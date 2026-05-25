@@ -44,8 +44,14 @@ jobs:
         run: |
           cd ios
           mkdir -p Payload
-          # Move the compiled .app into the Payload folder
-          mv build/Build/Products/Release-iphoneos/*.app Payload/
+          # Find the compiled .app and move it to the Payload folder
+          APP_PATH=$(find . -name "*.app" -type d | head -n 1)
+          if [ -z "$APP_PATH" ]; then
+            echo "Error: .app file not found!"
+            exit 1
+          fi
+          echo "Found app at: $APP_PATH"
+          mv "$APP_PATH" Payload/
           # Zip it up into an IPA
           zip -r ../GoCommutePH-unsigned.ipa Payload
 
