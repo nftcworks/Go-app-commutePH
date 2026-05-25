@@ -571,9 +571,22 @@ export const useRouting = (location, destination, selectedTerminal, customPaths,
 
           // Weather check
           try {
-            const weatherRes = await axios.get(`https://api.open-meteo.com/v1/forecast?latitude=${destination.latitude}&longitude=${destination.longitude}&current=precipitation`);
+            const weatherRes = await axios.get(`https://api.open-meteo.com/v1/forecast?latitude=${destination.latitude}&longitude=${destination.longitude}&current=precipitation,weathercode`);
             if (isMounted) {
-              setWeatherAlert(weatherRes.data.current && weatherRes.data.current.precipitation > 0);
+              const current = weatherRes.data.current;
+              if (current) {
+                let alert = null;
+                if (current.weathercode === 95 || current.weathercode === 96 || current.weathercode === 99) {
+                  alert = { type: 'thunderstorm', message: 'Thunderstorm expected!', icon: '⛈️' };
+                } else if (current.precipitation > 0 || [51,53,55,61,63,65,80,81,82].includes(current.weathercode)) {
+                  alert = { type: 'rain', message: 'Rain expected. Bring an umbrella!', icon: '🌧️' };
+                } else if ([71,73,75,77,85,86].includes(current.weathercode)) {
+                  alert = { type: 'snow', message: 'Snow expected!', icon: '❄️' };
+                } else if ([45,48].includes(current.weathercode)) {
+                  alert = { type: 'fog', message: 'Foggy conditions!', icon: '🌫️' };
+                }
+                setWeatherAlert(alert);
+              }
             }
           } catch (err) {
             console.log("Weather check failed", err);
@@ -606,7 +619,7 @@ export const useRouting = (location, destination, selectedTerminal, customPaths,
     setSelectedRouteIndex(0);
     setEtaInfo(null);
     setGeometries([]);
-    setWeatherAlert(false);
+    setWeatherAlert(null);
     setIsCalculating(false);
     lastRouted.current = { locLat: null, locLng: null, destLat: null, destLng: null, selectedTerminalId: null, combinedPathsHash: null };
   };

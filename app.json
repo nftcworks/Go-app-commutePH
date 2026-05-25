@@ -8,7 +8,9 @@
     "userInterfaceStyle": "light",
     "ios": {
       "supportsTablet": true,
+      "bundleIdentifier": "com.neonfelixe.gocommuteph",
       "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false,
         "NSLocationWhenInUseUsageDescription": "This app uses your location to track your commute.",
         "NSLocationAlwaysUsageDescription": "This app needs background location for commute tracking."
       }
@@ -22,6 +24,7 @@
       ]
     ],
     "android": {
+      "package": "com.neonfelixe.gocommuteph",
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
         "foregroundImage": "./assets/android-icon-foreground.png",

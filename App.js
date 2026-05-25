@@ -480,6 +480,7 @@ export default function App() {
           onSelectRoute={setSelectedRouteIndex}
           onOriginSelect={setCustomOrigin}
           onLocationSelect={setDestination}
+          weatherAlert={weatherAlert}
           selectedTerminal={selectedTerminal}
           onCloseTerminal={() => {
             setSelectedTerminal(null);
@@ -569,12 +570,6 @@ export default function App() {
             </TouchableOpacity>
           </View>
         </>
-      )}
-
-      {!isCommuting && weatherAlert && (
-        <View style={styles.weatherBanner}>
-          <Text style={styles.weatherText}>🌧️ Rain expected at your destination. Bring an umbrella!</Text>
-        </View>
       )}
 
       {!isCommuting && !isPinningMode && (
@@ -1031,27 +1026,7 @@ const styles = StyleSheet.create({
   devGearIcon: {
     fontSize: 24,
   },
-  weatherBanner: {
-    position: 'absolute',
-    top: Platform.OS === 'ios' ? 60 : 40,
-    left: 80,
-    right: 16,
-    backgroundColor: '#007AFF',
-    borderRadius: 12,
-    padding: 12,
-    zIndex: 95,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.15,
-    shadowRadius: 12,
-    elevation: 8,
-  },
-  weatherText: {
-    color: '#FFFFFF',
-    fontSize: 13,
-    fontWeight: '600',
-    textAlign: 'center',
-  },
+
   dbStatusPill: {
     position: 'absolute',
     top: 60,

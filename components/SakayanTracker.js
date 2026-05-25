@@ -33,7 +33,7 @@ const SNAP_HALF = 360;
 const SNAP_FULL = SCREEN_HEIGHT * 0.85;
 const SAVED_PLACES_KEY = '@saved_places_v1';
 
-export default function SakayanTracker({ currentLocation, customOrigin, selectedTerminal, onCloseTerminal, onRemoveTerminal, onDrawRoute, onOriginSelect, etaInfo, routeOptions, selectedRouteIndex, onSelectRoute, onLocationSelect, onReportIncident, onCancelRoute, onRideStateChange, onPinTerminal, onEtaUpdate, isMapTapped, destination, isDarkMode, onSheetSnapChange, recenterMap, showPinButton, onDeleteCustomRoute }) {
+export default function SakayanTracker({ currentLocation, customOrigin, selectedTerminal, onCloseTerminal, onRemoveTerminal, onDrawRoute, onOriginSelect, etaInfo, routeOptions, selectedRouteIndex, onSelectRoute, onLocationSelect, onReportIncident, onCancelRoute, onRideStateChange, onPinTerminal, onEtaUpdate, isMapTapped, destination, isDarkMode, onSheetSnapChange, recenterMap, showPinButton, onDeleteCustomRoute, weatherAlert }) {
   const [isRiding, setIsRiding] = useState(false);
   const [reportVisible, setReportVisible] = useState(false);
   const [searchTarget, setSearchTarget] = useState(null); // 'origin' | 'destination'
@@ -44,6 +44,15 @@ export default function SakayanTracker({ currentLocation, customOrigin, selected
   const [avgTime, setAvgTime] = useState(null);
   const [savedPlaces, setSavedPlaces] = useState([]);
   const [searchHistory, setSearchHistory] = useState([]);
+  const [isWeatherVisible, setIsWeatherVisible] = useState(false);
+  const weatherAnim = useRef(new Animated.Value(0)).current;
+  const routeHeaderAnim = useRef(new Animated.Value(0)).current;
+  const [currentNow, setCurrentNow] = useState(Date.now());
+
+  useEffect(() => {
+    const interval = setInterval(() => setCurrentNow(Date.now()), 15000);
+    return () => clearInterval(interval);
+  }, []);
   
   const colorScheme = useColorScheme();
   const isDark = typeof isDarkMode === 'boolean' ? isDarkMode : colorScheme === 'dark';
@@ -157,6 +166,72 @@ export default function SakayanTracker({ currentLocation, customOrigin, selected
     }
   }, [etaInfo?.destinationName]);
 
+  useEffect(() => {
+    if (etaInfo && !selectedTerminal) {
+      Animated.spring(routeHeaderAnim, {
+        toValue: 1,
+        friction: 6,
+        tension: 50,
+        useNativeDriver: true,
+      }).start();
+    } else {
+      routeHeaderAnim.setValue(0);
+    }
+  }, [etaInfo, selectedTerminal]);
+
+  useEffect(() => {
+    let t1, t2;
+    if (weatherAlert) {
+      setIsWeatherVisible(true);
+      t1 = setTimeout(() => {
+        Animated.spring(weatherAnim, {
+          toValue: 1,
+          friction: 5,
+          tension: 80,
+          useNativeDriver: true,
+        }).start();
+        t2 = setTimeout(() => {
+          Animated.spring(weatherAnim, {
+            toValue: 0,
+            friction: 7,
+            tension: 60,
+            useNativeDriver: true,
+          }).start(() => setIsWeatherVisible(false));
+        }, 4000);
+      }, 1000);
+    } else {
+      Animated.timing(weatherAnim, {
+        toValue: 0,
+        duration: 200,
+        useNativeDriver: true,
+      }).start(() => setIsWeatherVisible(false));
+    }
+    return () => {
+      clearTimeout(t1);
+      clearTimeout(t2);
+    };
+  }, [weatherAlert]);
+
+  const toggleWeatherBubble = () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    if (isWeatherVisible) {
+      Animated.spring(weatherAnim, {
+        toValue: 0,
+        friction: 7,
+        tension: 60,
+        useNativeDriver: true,
+      }).start(() => setIsWeatherVisible(false));
+    } else {
+      setIsWeatherVisible(true);
+      Animated.spring(weatherAnim, {
+        toValue: 1,
+        friction: 5,
+        tension: 80,
+        useNativeDriver: true,
+      }).start();
+    }
+  };
+
   const handleToggleRide = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
@@ -245,6 +320,26 @@ export default function SakayanTracker({ currentLocation, customOrigin, selected
     return [];
   };
 
+  let dynamicArrivalDate = null;
+  let dynamicDurationMins = 0;
+  
+  if (etaInfo) {
+    const durationMs = etaInfo.duration * 1000;
+    if (isRiding && rideStartTime) {
+       const expectedArrivalMs = rideStartTime + durationMs;
+       dynamicArrivalDate = new Date(expectedArrivalMs);
+       dynamicDurationMins = Math.max(0, Math.round((expectedArrivalMs - currentNow) / 60000));
+    } else {
+       dynamicArrivalDate = new Date(currentNow + durationMs);
+       dynamicDurationMins = Math.round(durationMs / 60000);
+    }
+  }
+
+  const getArrivalTime = (dateObj) => {
+    if (!dateObj) return '';
+    return dateObj.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  };
+
   return (
     <View 
       style={[styles.overlay, !!searchTarget && styles.overlayFullScreen]} 
@@ -285,13 +380,49 @@ export default function SakayanTracker({ currentLocation, customOrigin, selected
 
           {/* Waze-style Sticky Header for Active Route */}
           {etaInfo && !selectedTerminal && (
-            <View style={[styles.stickyRouteHeader, isDark && styles.darkStickyRouteHeader]}>
+            <Animated.View style={[
+              styles.stickyRouteHeader, 
+              isDark && styles.darkStickyRouteHeader,
+              {
+                opacity: routeHeaderAnim,
+                transform: [{ translateY: routeHeaderAnim.interpolate({ inputRange: [0, 1], outputRange: [20, 0] }) }]
+              }
+            ]}>
               <View style={styles.stickyHeaderRow}>
                 <View style={styles.stickyHeaderLeft}>
                   <View style={styles.etaRow}>
                     <Text style={[styles.etaText, isDark && styles.darkEtaText, isRiding && styles.commuteEtaText]}>
-                      {Math.round(etaInfo.duration / 60)} min
+                      {getArrivalTime(dynamicArrivalDate)}
                     </Text>
+                    {weatherAlert && !isRiding && (
+                      <View style={{ zIndex: 100 }}>
+                        {isWeatherVisible && (
+                          <Animated.View style={[
+                            styles.weatherSpeechBubble, 
+                            isDark && styles.darkWeatherSpeechBubble,
+                            {
+                              opacity: weatherAnim,
+                              transform: [
+                                { scale: weatherAnim },
+                                { translateY: weatherAnim.interpolate({ inputRange: [0, 1], outputRange: [15, 0] }) }
+                              ]
+                            }
+                          ]}>
+                            <Text style={[styles.weatherPillText, isDark && styles.darkWeatherPillText]}>
+                              {weatherAlert.message || 'Weather alert'}
+                            </Text>
+                            <View style={[styles.weatherSpeechTriangle, isDark && styles.darkWeatherSpeechTriangle]} />
+                          </Animated.View>
+                        )}
+                        <TouchableOpacity 
+                          style={[styles.weatherPill, isDark && styles.darkWeatherPill]}
+                          onPress={toggleWeatherBubble}
+                          activeOpacity={0.8}
+                        >
+                          <Text style={styles.weatherPillIcon}>{weatherAlert.icon || '☁️'}</Text>
+                        </TouchableOpacity>
+                      </View>
+                    )}
                     {!isRiding && (
                       <TouchableOpacity 
                         style={[styles.editEtaBtn, isDark && styles.darkEditEtaBtn]}
@@ -307,7 +438,7 @@ export default function SakayanTracker({ currentLocation, customOrigin, selected
                     )}
                   </View>
                   <Text style={[styles.distanceText, isDark && styles.darkDistanceText]}>
-                    {etaInfo.distance} km • ₱{suggestedFare}
+                    {dynamicDurationMins} min • {etaInfo.distance} km • ₱{suggestedFare}
                     {avgTime ? ` • Avg: ${avgTime}m` : ''}
                   </Text>
                   <Text style={[styles.destinationTitle, isDark && styles.darkDestinationTitle]} numberOfLines={1}>To: {etaInfo.destinationName}</Text>
@@ -332,7 +463,7 @@ export default function SakayanTracker({ currentLocation, customOrigin, selected
                   {isRiding ? 'End Commute' : 'Leave Now'}
                 </Text>
               </TouchableOpacity>
-            </View>
+            </Animated.View>
           )}
 
           {/* Sticky Search Bar when no active route */}
@@ -802,6 +933,68 @@ const styles = StyleSheet.create({
   },
   darkTerminalBtnCloseText: {
     color: '#FFFFFF',
+  },
+  weatherPill: {
+    backgroundColor: 'rgba(0, 122, 255, 0.1)',
+    borderRadius: 14,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    marginLeft: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  darkWeatherPill: {
+    backgroundColor: 'rgba(10, 132, 255, 0.2)',
+  },
+  weatherPillIcon: {
+    fontSize: 16,
+  },
+  weatherSpeechBubble: {
+    position: 'absolute',
+    bottom: 42,
+    left: -20,
+    backgroundColor: '#E6F4FE',
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 8,
+    elevation: 6,
+    minWidth: 160,
+    zIndex: 100,
+  },
+  darkWeatherSpeechBubble: {
+    backgroundColor: '#003366',
+  },
+  weatherSpeechTriangle: {
+    position: 'absolute',
+    bottom: -8,
+    left: 38,
+    width: 0,
+    height: 0,
+    borderLeftWidth: 8,
+    borderRightWidth: 8,
+    borderTopWidth: 8,
+    borderStyle: 'solid',
+    backgroundColor: 'transparent',
+    borderLeftColor: 'transparent',
+    borderRightColor: 'transparent',
+    borderTopColor: '#E6F4FE',
+  },
+  darkWeatherSpeechTriangle: {
+    borderTopColor: '#003366',
+  },
+  weatherPillText: {
+    color: '#005BB5',
+    fontSize: 12,
+    fontWeight: '600',
+    textAlign: 'center',
+  },
+  darkWeatherPillText: {
+    color: '#66B2FF',
   },
   // --- Standard Styles ---
   overlay: {
