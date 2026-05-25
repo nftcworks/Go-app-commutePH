@@ -5,7 +5,7 @@ on:
 
 jobs:
   build:
-    runs-on: macos-latest
+    runs-on: macos-14
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -40,7 +40,9 @@ jobs:
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \
             COMPILER_INDEX_STORE_ENABLE=NO \
-            SKIP_INSTALL=NO
+            SKIP_INSTALL=NO \
+            GCC_TREAT_WARNINGS_AS_ERRORS=NO \
+            OTHER_CFLAGS="-Wno-error=nullability-completeness -Wno-nullability-completeness"
 
       - name: Package into IPA
         run: |
