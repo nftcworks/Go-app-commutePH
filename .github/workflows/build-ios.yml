@@ -25,7 +25,7 @@ jobs:
         run: |
           cd ios
           # Auto-detect Workspace and Scheme
-          WORKSPACE=$(ls -1 *.xcworkspace | head -n 1)
+          WORKSPACE=$(ls -d *.xcworkspace | head -n 1)
           SCHEME=$(basename "$WORKSPACE" .xcworkspace)
           
           echo "Building Workspace: $WORKSPACE, Scheme: $SCHEME"
