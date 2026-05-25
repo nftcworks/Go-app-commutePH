@@ -24,9 +24,10 @@ jobs:
       - name: Build unsigned IPA
         run: |
           cd ios
-          # Auto-detect Workspace and Scheme robustly
-          WORKSPACE=$(ls | grep .xcworkspace | head -1)
-          SCHEME=$(basename "$WORKSPACE" .xcworkspace)
+          # Auto-detect Workspace and Scheme safely without pipes
+          WORKSPACE_FILE=(*.xcworkspace)
+          WORKSPACE="${WORKSPACE_FILE[0]}"
+          SCHEME="${WORKSPACE%.*}"
           
           echo "Building Workspace: $WORKSPACE, Scheme: $SCHEME"
           
