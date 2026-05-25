@@ -5,15 +5,13 @@ on:
 
 jobs:
   build:
-    runs-on: macos-15
+    runs-on: macos-latest
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Select Xcode 16.2
-        run: |
-          sudo xcode-select -s /Applications/Xcode_16.2.app/Contents/Developer
-          xcodebuild -version
+      - name: Print Xcode version
+        run: xcodebuild -version
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -26,15 +24,26 @@ jobs:
       - name: Generate iOS project (Prebuild)
         run: npx expo prebuild -p ios --clean
 
-      - name: Suppress pod warnings and reinstall
+      - name: Patch Podfile and reinstall pods
         run: |
           cd ios
-          # Insert inhibit_all_warnings! at top of Podfile to silence
-          # nullability warnings in third-party pods (expo-modules-core, expo-file-system)
+          # Suppress all warnings in third-party pods (fixes Xcode 16.4 nullability errors)
           sed -i '' '1s/^/inhibit_all_warnings!\
           /' Podfile
-          cat Podfile | head -5
+          echo "--- Podfile head ---"
+          head -5 Podfile
           pod install --repo-update
+
+      - name: Suppress nullability warnings in pod xcconfigs
+        run: |
+          cd ios
+          # Patch all pod xcconfig files to add -Wno-nullability-completeness
+          find Pods/Target\ Support\ Files -name "*.xcconfig" | while read f; do
+            if grep -q "OTHER_CFLAGS" "$f"; then
+              sed -i '' 's/OTHER_CFLAGS = /OTHER_CFLAGS = -Wno-nullability-completeness /g' "$f"
+            fi
+          done
+          echo "Patched xcconfig files"
 
       - name: Build unsigned archive
         run: |
@@ -42,9 +51,9 @@ jobs:
           # Auto-detect Workspace and Scheme
           WORKSPACE=$(ls -d *.xcworkspace | head -n 1)
           SCHEME=$(basename "$WORKSPACE" .xcworkspace)
-          
+
           echo "Building Workspace: $WORKSPACE, Scheme: $SCHEME"
-          
+
           xcodebuild archive \
             -workspace "$WORKSPACE" \
             -scheme "$SCHEME" \
@@ -61,12 +70,10 @@ jobs:
       - name: Package into IPA
         run: |
           cd ios
-          # Debug: show archive structure
           echo "Archive contents:"
           find unsigned.xcarchive -name "*.app" -type d
-          
+
           mkdir -p Payload
-          # Find the compiled .app inside the archive
           APP_PATH=$(find unsigned.xcarchive -name "*.app" -type d | head -n 1)
           if [ -z "$APP_PATH" ]; then
             echo "Error: .app file not found inside the archive!"
@@ -76,7 +83,6 @@ jobs:
           fi
           echo "Found app at: $APP_PATH"
           cp -r "$APP_PATH" Payload/
-          # Zip it up into an IPA
           zip -r ../GoCommutePH-unsigned.ipa Payload
 
       - name: Upload Artifact
