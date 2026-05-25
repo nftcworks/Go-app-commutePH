@@ -21,12 +21,17 @@ jobs:
       - name: Generate iOS project (Prebuild)
         run: npx expo prebuild -p ios --clean
 
+      - name: Install CocoaPods
+        run: |
+          cd ios
+          pod install --repo-update
+
       - name: Build unsigned IPA
         run: |
           cd ios
           # Auto-detect Workspace and Scheme
-          WORKSPACE=$(ls | grep .xcworkspace | head -1)
-          SCHEME=$(xcodebuild -workspace "$WORKSPACE" -list | awk '/Schemes:/{getline; print $1}')
+          WORKSPACE=$(ls -d *.xcworkspace | head -n 1)
+          SCHEME=$(basename "$WORKSPACE" .xcworkspace)
           
           echo "Building Workspace: $WORKSPACE, Scheme: $SCHEME"
           
@@ -39,20 +44,28 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \
-            COMPILER_INDEX_STORE_ENABLE=NO
+            COMPILER_INDEX_STORE_ENABLE=NO \
+            SKIP_INSTALL=NO \
+            GCC_TREAT_WARNINGS_AS_ERRORS=NO
 
       - name: Package into IPA
         run: |
           cd ios
+          # Debug: show archive structure
+          echo "Archive contents:"
+          find unsigned.xcarchive -name "*.app" -type d
+          
           mkdir -p Payload
-          # Find the compiled .app inside the archive and move it to the Payload folder
-          APP_PATH=$(find unsigned.xcarchive/Products/Applications -name "*.app" -type d | head -n 1)
+          # Find the compiled .app inside the archive
+          APP_PATH=$(find unsigned.xcarchive -name "*.app" -type d | head -n 1)
           if [ -z "$APP_PATH" ]; then
             echo "Error: .app file not found inside the archive!"
+            echo "Full archive structure:"
+            find unsigned.xcarchive -type d
             exit 1
           fi
           echo "Found app at: $APP_PATH"
-          mv "$APP_PATH" Payload/
+          cp -r "$APP_PATH" Payload/
           # Zip it up into an IPA
           zip -r ../GoCommutePH-unsigned.ipa Payload
 
