@@ -119,7 +119,7 @@ export default function ProfileModal({
               <Text style={styles.avatarText}>🚗</Text>
             </View>
             <View style={styles.profileInfo}>
-              <Text style={[styles.profileName, isDark && styles.darkText]}>Waze Commuter</Text>
+              <Text style={[styles.profileName, isDark && styles.darkText]}>Go Commuter</Text>
               <View style={styles.badgeContainer}>
                 <Text style={styles.badgeText}>Beta Tester</Text>
               </View>

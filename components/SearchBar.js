@@ -51,7 +51,7 @@ export default function SearchBar({ onLocationSelect, onFocus, onBlur, isDarkMod
             countrycodes: 'ph' // Limit to Philippines
           },
           headers: {
-            'User-Agent': 'WazeCommuteApp/1.0'
+            'User-Agent': 'GoCommutePH/1.0'
           }
         });
         setResults(response.data);
@@ -170,6 +170,11 @@ const styles = StyleSheet.create({
     minHeight: 56,
     borderWidth: 1,
     borderColor: '#E5E5EA',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.12,
+    shadowRadius: 12,
+    elevation: 8,
   },
   input: {
     flex: 1,
@@ -189,6 +194,11 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#E5E5EA',
     overflow: 'hidden',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.15,
+    shadowRadius: 20,
+    elevation: 12,
   },
   historyTitle: {
     paddingHorizontal: 16,

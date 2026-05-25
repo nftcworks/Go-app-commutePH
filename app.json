@@ -1,7 +1,7 @@
 {
   "expo": {
-    "name": "WazeCommuteApp",
-    "slug": "WazeCommuteApp",
+    "name": "Go commute PH",
+    "slug": "go-commute-ph",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
@@ -17,7 +17,7 @@
       [
         "expo-location",
         {
-          "locationAlwaysAndWhenInUsePermission": "Allow WazeCommuteApp to use your location."
+          "locationAlwaysAndWhenInUsePermission": "Allow Go commute PH to use your location."
         }
       ]
     ],

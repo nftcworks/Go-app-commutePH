@@ -84,13 +84,14 @@ export const useTerminals = () => {
     });
 
     try {
-      await supabase.from('terminals').insert([{
+      const { error } = await supabase.from('terminals').insert([{
         category: newTerminal.category,
         label: newTerminal.label,
         route: newTerminal.route || '',
         latitude: newTerminal.latitude,
         longitude: newTerminal.longitude,
       }]);
+      if (error) throw error;
     } catch (err) {
       console.log("Supabase save error", err);
       setDbStatus('offline');
@@ -106,7 +107,8 @@ export const useTerminals = () => {
     });
 
     try {
-      await supabase.from('terminals').delete().eq('id', id);
+      const { error } = await supabase.from('terminals').delete().eq('id', id);
+      if (error) throw error;
     } catch (err) {
       console.log("Supabase delete error", err);
     }
@@ -121,7 +123,8 @@ export const useTerminals = () => {
     });
 
     try {
-      await supabase.from('terminals').update(updates).eq('id', id);
+      const { error } = await supabase.from('terminals').update(updates).eq('id', id);
+      if (error) throw error;
     } catch (err) {
       console.log("Supabase update error", err);
     }

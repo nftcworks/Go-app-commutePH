@@ -1,9 +1,9 @@
 @echo off
-TITLE WazeCommuteApp - Expo Server
+TITLE Go commute PH - Expo Server
 COLOR 0A
 
 echo ===================================================
-echo Starting WazeCommuteApp (Public Transit Tracker)
+echo Starting Go commute PH (Public Transit Tracker)
 echo ===================================================
 echo.
 echo Please make sure you have the "Expo Go" app installed on your phone.

@@ -46,6 +46,16 @@ export const useRouting = (location, destination, selectedTerminal, customPaths,
         let allGeometries = [];
         let allOptions = [];
         
+        // Merge local custom paths with cloud custom paths from all terminals
+        const combinedPaths = { ...(customPaths || {}) };
+        if (terminals && Array.isArray(terminals)) {
+          terminals.forEach(t => {
+            if (t.custom_paths) {
+              Object.assign(combinedPaths, t.custom_paths);
+            }
+          });
+        }
+        
         const getDistance = (lat1, lon1, lat2, lon2) => {
           const p = 0.017453292519943295;
           const a = 0.5 - Math.cos((lat2 - lat1) * p)/2 + Math.cos(lat1 * p) * Math.cos(lat2 * p) * (1 - Math.cos((lon2 - lon1) * p))/2;
@@ -105,9 +115,9 @@ export const useRouting = (location, destination, selectedTerminal, customPaths,
 
             if (walkToTerm > 2.5) continue; // Too far to walk to this jeep/bus terminal
 
-            const routeKeys = Object.keys(customPaths || {}).filter(k => k.startsWith(`route_from_${terminal.id}`));
+            const routeKeys = Object.keys(combinedPaths).filter(k => k.startsWith(`route_from_${terminal.id}`));
             for (let rKey of routeKeys) {
-               const rObj = customPaths[rKey];
+               const rObj = combinedPaths[rKey];
                const paths = rObj.paths ? rObj.paths : [rObj];
                const coords = Array.isArray(paths[0]) ? paths[0] : paths[0].coordinates;
                
@@ -181,7 +191,7 @@ export const useRouting = (location, destination, selectedTerminal, customPaths,
         if (activeTerminal.isComboPair && activeTerminal.comboTrainOrig && activeTerminal.comboTrainDest) {
              const trainOrig = activeTerminal.comboTrainOrig;
              const trainDest = activeTerminal.comboTrainDest;
-             const customRouteObj = customPaths[activeTerminal.comboRouteKey];
+             const customRouteObj = combinedPaths[activeTerminal.comboRouteKey];
              const paths = customRouteObj.paths ? customRouteObj.paths : [customRouteObj];
              const fullCoords = Array.isArray(paths[0]) ? paths[0] : paths[0].coordinates;
              
@@ -303,14 +313,14 @@ export const useRouting = (location, destination, selectedTerminal, customPaths,
         }
         // --- CUSTOM PATHS & FALLBACKS ---
         else {
-          const routeKeys = Object.keys(customPaths || {}).filter(k => k.startsWith(`route_from_${activeTerminal.id}`));
+          const routeKeys = Object.keys(combinedPaths).filter(k => k.startsWith(`route_from_${activeTerminal.id}`));
           
           if (routeKeys.length > 0) {
             let bestRouteKey = routeKeys[0];
             let minDestDist = Infinity;
             
             for (let rKey of routeKeys) {
-               const rObj = customPaths[rKey];
+               const rObj = combinedPaths[rKey];
                const paths = rObj.paths ? rObj.paths : [rObj];
                const firstPath = paths[0];
                const coords = Array.isArray(firstPath) ? firstPath : firstPath.coordinates;
@@ -329,7 +339,7 @@ export const useRouting = (location, destination, selectedTerminal, customPaths,
                }
             }
             
-            const customRouteObj = customPaths[bestRouteKey];
+            const customRouteObj = combinedPaths[bestRouteKey];
             const pathsToRender = customRouteObj.paths ? customRouteObj.paths : [customRouteObj];
             
             for (let idx = 0; idx < pathsToRender.length; idx++) {

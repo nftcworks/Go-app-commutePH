@@ -1,5 +1,5 @@
 {
-  "name": "wazecommuteapp",
+  "name": "go-commute-ph",
   "version": "1.0.0",
   "main": "index.js",
   "dependencies": {

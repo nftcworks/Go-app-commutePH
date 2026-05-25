@@ -19,6 +19,7 @@ import {
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Haptics from 'expo-haptics';
+import { MaterialIcons } from '@expo/vector-icons';
 import { saveBoardingLog, saveCommuteHistory, getCommuteHistory, getAverageCommuteTime } from '../utils/storage';
 import ReportModal from './ReportModal';
 import RouteList from './RouteList';
@@ -32,7 +33,7 @@ const SNAP_HALF = 360;
 const SNAP_FULL = SCREEN_HEIGHT * 0.85;
 const SAVED_PLACES_KEY = '@saved_places_v1';
 
-export default function SakayanTracker({ currentLocation, customOrigin, selectedTerminal, onCloseTerminal, onRemoveTerminal, onDrawRoute, onOriginSelect, etaInfo, routeOptions, selectedRouteIndex, onSelectRoute, onLocationSelect, onReportIncident, onCancelRoute, onRideStateChange, onPinTerminal, onEtaUpdate, isMapTapped, destination, isDarkMode, onSheetSnapChange }) {
+export default function SakayanTracker({ currentLocation, customOrigin, selectedTerminal, onCloseTerminal, onRemoveTerminal, onDrawRoute, onOriginSelect, etaInfo, routeOptions, selectedRouteIndex, onSelectRoute, onLocationSelect, onReportIncident, onCancelRoute, onRideStateChange, onPinTerminal, onEtaUpdate, isMapTapped, destination, isDarkMode, onSheetSnapChange, recenterMap, showPinButton, onDeleteCustomRoute }) {
   const [isRiding, setIsRiding] = useState(false);
   const [reportVisible, setReportVisible] = useState(false);
   const [searchTarget, setSearchTarget] = useState(null); // 'origin' | 'destination'
@@ -77,7 +78,6 @@ export default function SakayanTracker({ currentLocation, customOrigin, selected
         const newHeight = lastSnap.current - gestureState.dy;
         const clamped = Math.max(getSnapCollapsed(), Math.min(SNAP_FULL, newHeight));
         sheetHeight.setValue(clamped);
-        if (onSheetSnapChange) onSheetSnapChange(clamped);
       },
       onPanResponderRelease: (_, gestureState) => {
         const current = lastSnap.current - gestureState.dy;
@@ -103,6 +103,16 @@ export default function SakayanTracker({ currentLocation, customOrigin, selected
       },
     })
   ).current;
+
+  // Floating button animations
+  const floatingOpacity = sheetHeight.interpolate({
+    inputRange: [getSnapCollapsed(), SNAP_HALF, SNAP_FULL - 100, SNAP_FULL],
+    outputRange: [1, 1, 0, 0],
+    extrapolate: 'clamp',
+  });
+
+  const recenterBottom = Animated.add(sheetHeight, new Animated.Value(16));
+  const pinBottom = Animated.add(sheetHeight, new Animated.Value(80));
 
   // Collapse when map is tapped
   useEffect(() => {
@@ -241,6 +251,29 @@ export default function SakayanTracker({ currentLocation, customOrigin, selected
       pointerEvents="box-none"
     >
       
+      {/* Native Floating Buttons - automatically track sheet height and fade out on expand */}
+      {!isRiding && (
+        <Animated.View style={[styles.recenterContainer, { bottom: recenterBottom, opacity: floatingOpacity }]}>
+          <TouchableOpacity onPress={recenterMap} activeOpacity={0.7} hitSlop={10}>
+            <View style={[styles.devGearBlur, isDark && styles.darkDevGearBlur, { padding: 12 }]}>
+              <MaterialIcons name="my-location" size={26} color={isDark ? '#0A84FF' : '#007AFF'} />
+            </View>
+          </TouchableOpacity>
+        </Animated.View>
+      )}
+
+      {!isRiding && showPinButton && (
+        <Animated.View style={[styles.floatingPinContainer, { bottom: pinBottom, opacity: floatingOpacity }]}>
+          <TouchableOpacity onPress={onPinTerminal} activeOpacity={0.8} hitSlop={10}>
+            <View style={styles.wazeReportFab}>
+              <View style={styles.pinGlyphOuter}>
+                <View style={styles.pinGlyphInner} />
+              </View>
+            </View>
+          </TouchableOpacity>
+        </Animated.View>
+      )}
+
       {/* Draggable Bottom Sheet */}
       {!searchTarget && (
         <Animated.View style={[styles.bottomSheet, isDark && styles.darkBottomSheet, { height: sheetHeight }]} pointerEvents="auto">
@@ -520,6 +553,18 @@ export default function SakayanTracker({ currentLocation, customOrigin, selected
                       <Text style={[styles.routeTabBadge, isActive && styles.routeTabBadgeActive]}>
                         {option.badge}
                       </Text>
+                      {option.isCustom && isActive && (
+                        <TouchableOpacity 
+                           onPress={(e) => {
+                             e.stopPropagation();
+                             if (onDeleteCustomRoute) onDeleteCustomRoute(option.routeId, option.terminalId);
+                           }}
+                           style={{ marginLeft: 8 }}
+                           hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                        >
+                          <MaterialIcons name="delete" size={18} color={isDark ? '#FF453A' : '#FF3B30'} />
+                        </TouchableOpacity>
+                      )}
                     </TouchableOpacity>
                   );
                 })}
@@ -772,13 +817,16 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFFFFF',
     borderTopLeftRadius: 32,
     borderTopRightRadius: 32,
+    borderTopWidth: 1,
+    borderLeftWidth: 1,
+    borderRightWidth: 1,
+    borderColor: '#E5E5EA',
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: -8 },
-    shadowOpacity: 0.15,
-    shadowRadius: 24,
+    shadowOffset: { width: 0, height: -4 },
+    shadowOpacity: 0.2,
+    shadowRadius: 20,
     elevation: 30,
     width: '100%',
-    overflow: 'hidden',
   },
   grabberHitArea: {
     alignItems: 'center',
@@ -1386,11 +1434,11 @@ const styles = StyleSheet.create({
   },
   inactiveSearchInput: {
     backgroundColor: '#F2F2F7',
-    borderRadius: 12,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
+    borderRadius: 16,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
     justifyContent: 'center',
-    minHeight: 44,
+    minHeight: 56,
     borderWidth: 1,
     borderColor: '#E5E5EA',
   },
@@ -1399,28 +1447,28 @@ const styles = StyleSheet.create({
     borderColor: '#3A3A3C',
   },
   inactiveSearchText: {
-    fontSize: 15,
+    fontSize: 17,
     color: '#8E8E93',
-    fontWeight: '500',
+    fontWeight: '600',
   },
   dualSearchBarOverride: {
-    borderRadius: 12,
-    minHeight: 44,
-    paddingHorizontal: 12,
+    borderRadius: 16,
+    minHeight: 56,
+    paddingHorizontal: 16,
     borderWidth: 1,
     borderColor: '#E5E5EA',
     flex: 0,
     width: '100%',
   },
   dualSearchInputOverride: {
-    fontSize: 15,
-    paddingVertical: 8,
+    fontSize: 17,
+    paddingVertical: 12,
   },
   currentLocationPill: {
     backgroundColor: '#E5F1FF',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 16,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 20,
     alignSelf: 'flex-start',
     flexDirection: 'row',
     alignItems: 'center',
@@ -1430,10 +1478,74 @@ const styles = StyleSheet.create({
   },
   currentLocationPillText: {
     color: '#007AFF',
-    fontSize: 14,
-    fontWeight: '600',
+    fontWeight: '700',
+    fontSize: 16,
   },
   darkCurrentLocationPillText: {
+    color: '#0A84FF',
+  },
+  // New floating button styles transferred from App.js
+  recenterContainer: {
+    position: 'absolute',
+    left: 16,
+    zIndex: 900,
+  },
+  floatingPinContainer: {
+    position: 'absolute',
+    right: 16,
+    zIndex: 900,
+  },
+  wazeReportFab: {
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    backgroundColor: '#FFFFFF',
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.25,
+    shadowRadius: 8,
+    elevation: 8,
+    borderWidth: 1,
+    borderColor: '#E5E5EA',
+  },
+  pinGlyphOuter: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    borderWidth: 3,
+    borderColor: '#007AFF',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  pinGlyphInner: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#007AFF',
+  },
+  devGearBlur: {
+    backgroundColor: 'rgba(255, 255, 255, 0.95)',
+    padding: 14,
+    borderRadius: 24,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 10,
+    elevation: 6,
+    borderWidth: 1,
+    borderColor: '#E5E5EA',
+  },
+  darkDevGearBlur: {
+    backgroundColor: 'rgba(28, 28, 30, 0.95)',
+    borderColor: '#3A3A3C',
+  },
+  recenterIcon: {
+    fontSize: 20,
+    color: '#007AFF',
+  },
+  darkRecenterIcon: {
     color: '#0A84FF',
   },
 });

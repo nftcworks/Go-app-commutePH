@@ -1,4 +1,4 @@
-# WazeCommuteApp (Public Transit Tracker)
+# Go commute PH (Public Transit Tracker)
 
 A highly accurate, multi-modal public transit routing engine designed specifically to handle the complex realities of commuting in the Philippines. Unlike standard map apps that rely on generic transit data, this app introduces a **Custom Route Editor** and **Smart Multi-Modal Chaining** to handle Jeepneys, Tricycles, UV Express, Buses, and Trains with pinpoint accuracy.
 

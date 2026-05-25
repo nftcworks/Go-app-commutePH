@@ -28,7 +28,7 @@ export default function BetaDisclaimer() {
         <View style={styles.alertBox}>
           <Text style={styles.title}>Welcome to Beta</Text>
           <Text style={styles.message}>
-            This is an early developer preview of the Waze for Commuters app. Features and routes may be unstable.
+            This is an early developer preview of the Go commute PH app. Features and routes may be unstable.
           </Text>
 
           <View style={styles.featureItem}>
