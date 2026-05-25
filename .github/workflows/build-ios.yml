@@ -39,14 +39,15 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \
-            COMPILER_INDEX_STORE_ENABLE=NO
+            COMPILER_INDEX_STORE_ENABLE=NO \
+            SKIP_INSTALL=NO
 
       - name: Package into IPA
         run: |
           cd ios
           mkdir -p Payload
           # Find the compiled .app inside the archive and move it to the Payload folder
-          APP_PATH=$(find unsigned.xcarchive/Products/Applications -name "*.app" -type d | head -n 1)
+          APP_PATH=$(find unsigned.xcarchive -name "*.app" -type d | head -n 1)
           if [ -z "$APP_PATH" ]; then
             echo "Error: .app file not found inside the archive!"
             exit 1
