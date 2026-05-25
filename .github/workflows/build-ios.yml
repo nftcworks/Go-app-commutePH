@@ -24,9 +24,9 @@ jobs:
       - name: Build unsigned IPA
         run: |
           cd ios
-          # Auto-detect Workspace and Scheme robustly
+          # Auto-detect Workspace and Scheme
           WORKSPACE=$(ls | grep .xcworkspace | head -1)
-          SCHEME=$(basename "$WORKSPACE" .xcworkspace)
+          SCHEME=$(xcodebuild -workspace "$WORKSPACE" -list | awk '/Schemes:/{getline; print $1}')
           
           echo "Building Workspace: $WORKSPACE, Scheme: $SCHEME"
           
