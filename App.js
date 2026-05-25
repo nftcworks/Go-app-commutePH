@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { StyleSheet, View, Text, ActivityIndicator, LayoutAnimation, TouchableOpacity, Platform, useColorScheme, Alert, UIManager, Dimensions } from 'react-native';
+import { StyleSheet, View, Text, ActivityIndicator, LayoutAnimation, TouchableOpacity, Platform, useColorScheme, Alert, UIManager, Dimensions, ScrollView } from 'react-native';
 import MapView, { PROVIDER_DEFAULT, Polyline, Marker } from 'react-native-maps';
 import * as Haptics from 'expo-haptics';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -348,7 +348,6 @@ export default function App() {
             coordinates={drawnRoute}
             strokeWidth={5}
             strokeColor="#FF3B30"
-            lineDashPattern={[1]}
             zIndex={20}
           />
         )}
@@ -359,10 +358,10 @@ export default function App() {
             <Polyline
               key={`preview_${index}`}
               coordinates={variation.coordinates}
-              strokeWidth={isSelected ? 7 : 5}
-              strokeColor={isSelected ? "#007AFF" : (isDarkMode ? "rgba(85, 85, 85, 0.4)" : "rgba(160, 160, 165, 0.5)")}
-              lineDashPattern={variation.isDashed || !isSelected ? [10, 5] : null}
-              zIndex={isSelected ? 25 : 15}
+              strokeWidth={isSelected ? 6 : 4}
+              strokeColor={isSelected ? '#007AFF' : 'rgba(142, 142, 147, 0.5)'}
+              lineDashPattern={!isSelected ? [10, 5] : null}
+              zIndex={isSelected ? 30 : 25}
               tappable={true}
               onPress={() => setSelectedPreviewIndex(index)}
             />
@@ -767,6 +766,24 @@ export default function App() {
                     });
                     
                     try {
+                      const matchRes = await axios.get(`https://router.project-osrm.org/match/v1/driving/${coordsStr}?overview=full&geometries=geojson`);
+                      if (matchRes.data && matchRes.data.matchings) {
+                        matchRes.data.matchings.forEach((match, idx) => {
+                          const geom = match.geometry.coordinates.map(c => ({ latitude: c[1], longitude: c[0] }));
+                          variations.push({
+                            title: `Road Snap ${idx > 0 ? `(Part ${idx+1})` : ''}`.trim(),
+                            badge: "Aligned",
+                            coordinates: geom,
+                            isDashed: false,
+                            dropoffNameStr
+                          });
+                        });
+                      }
+                    } catch(e) {
+                      console.log("Match API failed", e.message);
+                    }
+                    
+                    try {
                       const walkRes = await axios.get(`https://router.project-osrm.org/route/v1/walking/${coordsStr}?overview=full&geometries=geojson`);
                       if (walkRes.data && walkRes.data.routes && walkRes.data.routes[0]) {
                         const geom = walkRes.data.routes[0].geometry.coordinates.map(c => ({ latitude: c[1], longitude: c[0] }));
@@ -856,6 +873,7 @@ export default function App() {
                   onPress={() => {
                     LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
                     setIsPreviewingPath(false);
+                    setDrawnRoute([]);
                   }}
                 >
                   <Text style={styles.drawBtnText}>Redraw</Text>
@@ -1211,5 +1229,44 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontWeight: '700',
     fontSize: 13,
+  },
+  routeTab: {
+    backgroundColor: '#F2F2F7',
+    borderRadius: 20,
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    marginRight: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#E5E5EA',
+    minHeight: 44,
+  },
+  routeTabActive: {
+    backgroundColor: '#007AFF',
+    borderColor: '#007AFF',
+  },
+  routeTabText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#3A3A3C',
+    marginRight: 6,
+  },
+  routeTabTextActive: {
+    color: '#FFFFFF',
+  },
+  routeTabBadge: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: '#8E8E93',
+    backgroundColor: '#E5E5EA',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 8,
+    overflow: 'hidden',
+  },
+  routeTabBadgeActive: {
+    color: '#007AFF',
+    backgroundColor: '#FFFFFF',
   },
 });

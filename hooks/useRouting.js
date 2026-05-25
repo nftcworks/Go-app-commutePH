@@ -21,6 +21,9 @@ export const useRouting = (location, destination, selectedTerminal, customPaths,
   const destName = destination?.name;
 
   const customPathsStr = JSON.stringify(customPaths || {});
+  const terminalsPathsStr = JSON.stringify((terminals || []).map(t => t.custom_paths || {}));
+  const combinedPathsHash = customPathsStr + terminalsPathsStr;
+  
   const selectedTerminalId = selectedTerminal?.id || null;
 
   useEffect(() => {
@@ -29,14 +32,14 @@ export const useRouting = (location, destination, selectedTerminal, customPaths,
     const destChanged = destLat !== lastRouted.current.destLat || destLng !== lastRouted.current.destLng;
     const originDiff = Math.abs(locLat - (lastRouted.current.locLat || locLat)) + Math.abs(locLng - (lastRouted.current.locLng || locLng));
     const terminalChanged = selectedTerminalId !== lastRouted.current.selectedTerminalId;
-    const customPathsChanged = customPathsStr !== lastRouted.current.customPathsStr;
+    const customPathsChanged = combinedPathsHash !== lastRouted.current.combinedPathsHash;
     
     // Only reroute if destination changed, origin moved significantly (> ~200m), terminal changed, or custom paths updated
     if (lastRouted.current.destLat && !destChanged && originDiff < 0.002 && !terminalChanged && !customPathsChanged) {
       return;
     }
 
-    lastRouted.current = { locLat, locLng, destLat, destLng, selectedTerminalId, customPathsStr };
+    lastRouted.current = { locLat, locLng, destLat, destLng, selectedTerminalId, combinedPathsHash };
     
     let isMounted = true;
     setIsCalculating(true);
@@ -263,6 +266,9 @@ export const useRouting = (location, destination, selectedTerminal, customPaths,
              allGeometries.push(segments);
              allOptions.push({
                 id: 'opt_combo',
+                routeId: activeTerminal.comboRouteKey,
+                terminalId: activeTerminal.id,
+                isCustom: true,
                 title: 'Intermodal Route',
                 badge: 'Combo',
                 durationMins: durationMinutes,
@@ -366,17 +372,52 @@ export const useRouting = (location, destination, selectedTerminal, customPaths,
               const endPoint = truncatedCoords[truncatedCoords.length - 1];
 
               const segments = [];
-              segments.push({ type: 'walk', coords: [{ latitude: locLat, longitude: locLng }, { latitude: activeTerminal.latitude, longitude: activeTerminal.longitude }] });
+              let startChainedTricycle = false;
+              const distToOrigin = getDistance(locLat, locLng, activeTerminal.latitude, activeTerminal.longitude);
+              let finalSteps = [];
+              let durationMinutes = 0;
+              let customSortScore = 0;
+
+              if (distToOrigin > 1.0) {
+                 const tricycles = (terminals || []).filter(t => t.category === 'tricycle');
+                 let closestStartTricycle = null;
+                 let minStartDist = 0.5;
+                 for (let t of tricycles) {
+                   const d = getDistance(locLat, locLng, t.latitude, t.longitude);
+                   if (d < minStartDist) { minStartDist = d; closestStartTricycle = t; }
+                 }
+                 if (closestStartTricycle) {
+                   startChainedTricycle = true;
+                   segments.push({ type: 'walk', coords: [{ latitude: locLat, longitude: locLng }, { latitude: closestStartTricycle.latitude, longitude: closestStartTricycle.longitude }] });
+                   try {
+                     const startTricyRes = await axios.get(`https://router.project-osrm.org/route/v1/driving/${closestStartTricycle.longitude},${closestStartTricycle.latitude};${activeTerminal.longitude},${activeTerminal.latitude}?overview=full&geometries=geojson`);
+                     if (startTricyRes.data.routes && startTricyRes.data.routes.length > 0) {
+                        const tricyRideCoords = startTricyRes.data.routes[0].geometry.coordinates.map(c => ({ latitude: c[1], longitude: c[0] }));
+                        segments.push({ type: 'ride', coords: tricyRideCoords, isDashed: false, category: 'tricycle' });
+                        const tricyDuration = Math.ceil(startTricyRes.data.routes[0].duration / 60);
+                        durationMinutes += tricyDuration + 3;
+                        finalSteps.push({ id: 'w0', type: 'walk', icon: '🚶', instruction: 'Walk to tricycle terminal', duration: 3 });
+                        finalSteps.push({ id: 'r0', type: 'ride', icon: '🛺', instruction: `Ride tricycle to ${activeTerminal.label || activeTerminal.category} terminal`, duration: tricyDuration });
+                        customSortScore += (3 * 2.0) + (tricyDuration * 1.5) + 5;
+                     } else { startChainedTricycle = false; }
+                   } catch (e) { startChainedTricycle = false; }
+                 }
+              }
+
+              if (!startChainedTricycle) {
+                segments.push({ type: 'walk', coords: [{ latitude: locLat, longitude: locLng }, { latitude: activeTerminal.latitude, longitude: activeTerminal.longitude }] });
+                const walk1Mins = Math.ceil(distToOrigin * 12);
+                finalSteps.push({ id: 'w1', type: 'walk', icon: '🚶', instruction: `Walk to ${activeTerminal.label || activeTerminal.category} terminal`, duration: walk1Mins });
+                durationMinutes += walk1Mins;
+                customSortScore += (walk1Mins * 2.0);
+              }
+
+              // Main Custom Path Ride
               segments.push({ type: 'ride', coords: truncatedCoords, isDashed: isDashed, category: activeTerminal.category });
-              
-              let finalSteps = [
-                { id: 'w1', type: 'walk', icon: '🚶', instruction: `Walk to ${activeTerminal.label || activeTerminal.category} terminal`, duration: Math.ceil(getDistance(locLat, locLng, activeTerminal.latitude, activeTerminal.longitude) * 12) },
-                { id: 'r1', type: 'ride', icon: '🚙', instruction: `Ride and drop-off near destination`, duration: Math.ceil(truncatedCoords.length * 0.5) }
-              ];
-              let durationMinutes = finalSteps[1].duration + 5;
-              
-              // Base custom path score (walk penalty + ride factor)
-              let customSortScore = (finalSteps[0].duration * 2.0) + (finalSteps[1].duration * 1.2);
+              const mainRideMins = Math.ceil(truncatedCoords.length * 0.5);
+              finalSteps.push({ id: 'r1', type: 'ride', icon: '🚙', instruction: `Ride and drop-off near destination`, duration: mainRideMins });
+              durationMinutes += mainRideMins + 5;
+              customSortScore += (mainRideMins * 1.2);
               
               // --- MULTI-MODAL CHAINING ---
               // If destination is far from drop-off (> 1km), search for tricycle terminal near drop-off
@@ -437,6 +478,9 @@ export const useRouting = (location, destination, selectedTerminal, customPaths,
               
               allOptions.push({
                 id: `custom_${idx}`,
+                routeId: bestRouteKey,
+                terminalId: activeTerminal.id,
+                isCustom: true,
                 title: idx === 0 ? (chainedTricycle ? 'Multi-Modal Route' : 'Main Custom Route') : `Alternative ${idx}`,
                 badge: idx === 0 ? 'Best' : 'Alt',
                 durationMins: durationMinutes,
@@ -547,7 +591,7 @@ export const useRouting = (location, destination, selectedTerminal, customPaths,
     getRoute();
 
     return () => { isMounted = false; };
-  }, [locLat, locLng, destLat, destLng, destName, selectedTerminalId, customPathsStr]);
+  }, [locLat, locLng, destLat, destLng, destName, selectedTerminalId, combinedPathsHash]);
 
   useEffect(() => {
     if (routeOptions.length > 0) {
@@ -564,7 +608,7 @@ export const useRouting = (location, destination, selectedTerminal, customPaths,
     setGeometries([]);
     setWeatherAlert(false);
     setIsCalculating(false);
-    lastRouted.current = { locLat: null, locLng: null, destLat: null, destLng: null, selectedTerminalId: null, customPathsStr: null };
+    lastRouted.current = { locLat: null, locLng: null, destLat: null, destLng: null, selectedTerminalId: null, combinedPathsHash: null };
   };
 
   return { routeOptions, selectedRouteIndex, setSelectedRouteIndex, geometries, etaInfo, weatherAlert, setEtaInfo, clearRoute, isCalculating };
