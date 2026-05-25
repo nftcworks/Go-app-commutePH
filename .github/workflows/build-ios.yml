@@ -5,10 +5,15 @@ on:
 
 jobs:
   build:
-    runs-on: macos-latest
+    runs-on: macos-15
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
+      - name: Select Xcode 16.2
+        run: |
+          sudo xcode-select -s /Applications/Xcode_16.2.app/Contents/Developer
+          xcodebuild -version
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -21,12 +26,17 @@ jobs:
       - name: Generate iOS project (Prebuild)
         run: npx expo prebuild -p ios --clean
 
-      - name: Install CocoaPods
+      - name: Suppress pod warnings and reinstall
         run: |
           cd ios
+          # Insert inhibit_all_warnings! at top of Podfile to silence
+          # nullability warnings in third-party pods (expo-modules-core, expo-file-system)
+          sed -i '' '1s/^/inhibit_all_warnings!\
+          /' Podfile
+          cat Podfile | head -5
           pod install --repo-update
 
-      - name: Build unsigned IPA
+      - name: Build unsigned archive
         run: |
           cd ios
           # Auto-detect Workspace and Scheme
