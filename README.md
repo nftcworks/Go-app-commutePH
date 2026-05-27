@@ -2,10 +2,10 @@
 
 A highly accurate, multi-modal public transit routing engine designed specifically to handle the complex realities of commuting in the Philippines. Unlike standard map apps that rely on generic transit data, this app introduces a **Custom Route Editor** and **Smart Multi-Modal Chaining** to handle Jeepneys, Tricycles, UV Express, Buses, and Trains with pinpoint accuracy.
 
-#Overview
+##Overview
 <div style="display:flex; gap:10px;">
-  <img src="https://github.com/user-attachments/assets/ac0c6cf6-422e-4a2b-9b55-c12780f5dc4f" width="400">
-  <img src="https://github.com/user-attachments/assets/39192475-b829-4253-b3f6-2fed08385200" width="400">
+  <img src="https://github.com/user-attachments/assets/ac0c6cf6-422e-4a2b-9b55-c12780f5dc4f" width="200">
+  <img src="https://github.com/user-attachments/assets/39192475-b829-4253-b3f6-2fed08385200" width="200">
 </div>
 
 
