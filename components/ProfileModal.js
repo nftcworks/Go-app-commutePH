@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Modal, Platform, ScrollView, Alert } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, Modal, Platform, ScrollView, Alert, Image, ActivityIndicator, TextInput, KeyboardAvoidingView } from 'react-native';
 import * as Haptics from 'expo-haptics';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { getCommuteHistory, clearCommuteLogs } from '../utils/storage';
+import { useAuth } from '../hooks/useAuth';
 
 export default function ProfileModal({ 
   visible, 
@@ -10,16 +11,63 @@ export default function ProfileModal({
   isDarkMode, 
   themePreference, 
   onThemeChange, 
-  showPinButton, 
+  showPinButton,
   onPinButtonChange,
+  onRouteDrawModeChange,
   routeDrawMode,
-  onRouteDrawModeChange 
+  hasDiscount,
+  onDiscountChange,
+  voiceEnabled,
+  onVoiceChange
 }) {
   const isDark = !!isDarkMode;
+  const { user, signInWithGoogle, signInWithEmail, signUpWithEmail, signOut } = useAuth();
+  const [isAuthLoading, setIsAuthLoading] = useState(false);
+  const [authMode, setAuthMode] = useState('login'); // 'login' or 'register'
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [stats, setStats] = useState({ totalTrips: 0, totalSpent: 0, totalMinutes: 0 });
   const [showDevConsole, setShowDevConsole] = useState(false);
   const [showPathManager, setShowPathManager] = useState(false);
   const [customPaths, setCustomPaths] = useState({});
+
+  const handleSignIn = async () => {
+    setIsAuthLoading(true);
+    await signInWithGoogle();
+    setIsAuthLoading(false);
+  };
+
+  const handleEmailAuth = async () => {
+    if (!email || !password) {
+      Alert.alert('Error', 'Please enter both email and password.');
+      return;
+    }
+    setIsAuthLoading(true);
+    let result;
+    if (authMode === 'login') {
+      result = await signInWithEmail(email, password);
+    } else {
+      result = await signUpWithEmail(email, password);
+      if (result.data?.user && !result.data?.session) {
+        Alert.alert('Success', 'Check your email to confirm your account!');
+      }
+    }
+    
+    if (result.error) {
+      Alert.alert('Authentication Error', result.error.message);
+    } else {
+      // Clear fields on success
+      setEmail('');
+      setPassword('');
+    }
+    setIsAuthLoading(false);
+  };
+
+  const handleSignOut = async () => {
+    setIsAuthLoading(true);
+    await signOut();
+    setIsAuthLoading(false);
+  };
 
   const loadCustomPaths = async () => {
     try {
@@ -115,11 +163,20 @@ export default function ProfileModal({
         <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
           {/* Profile Header */}
           <View style={[styles.profileHeader, isDark && styles.darkProfileHeader]}>
-            <View style={styles.avatarContainer}>
-              <Text style={styles.avatarText}>🚗</Text>
-            </View>
             <View style={styles.profileInfo}>
-              <Text style={[styles.profileName, isDark && styles.darkText]}>Go Commuter</Text>
+                <View style={styles.userInfo}>
+                  <Image 
+                    source={{ uri: user?.user_metadata?.avatar_url || 'https://api.dicebear.com/7.x/initials/svg?seed=Commuter' }} 
+                    style={styles.avatar} 
+                  />
+                  <View>
+                    <Text style={[styles.userName, isDark && styles.darkText]}>{user?.user_metadata?.nickname || user?.user_metadata?.full_name || 'Commuter'}</Text>
+                    <Text style={styles.userEmail}>{user?.email}</Text>
+                  </View>
+                  <TouchableOpacity onPress={handleSignOut} style={styles.signOutBtn} disabled={isAuthLoading}>
+                    {isAuthLoading ? <ActivityIndicator size="small" color="#FF3B30" /> : <Text style={styles.signOutText}>Sign Out</Text>}
+                  </TouchableOpacity>
+                </View>
               <View style={styles.badgeContainer}>
                 <Text style={styles.badgeText}>Beta Tester</Text>
               </View>
@@ -170,6 +227,40 @@ export default function ProfileModal({
               );
             })}
           </View>
+          
+          {/* Preferences */}
+          <Text style={styles.sectionHeader}>PREFERENCES</Text>
+          <TouchableOpacity
+            style={[styles.settingItem, isDark && styles.darkSettingItem, { marginBottom: 24, borderRadius: 16, backgroundColor: isDark ? '#1C1C1E' : '#FFFFFF' }]}
+            onPress={() => {
+              Haptics.selectionAsync();
+              if (onDiscountChange) onDiscountChange(!hasDiscount);
+            }}
+            activeOpacity={0.8}
+            hitSlop={6}
+          >
+            <View style={styles.settingContent}>
+              <Text style={[styles.settingText, isDark && styles.darkSettingText]}>Apply 20% Discount</Text>
+              <Text style={styles.settingSubtext}>For Students, Seniors, and PWDs</Text>
+            </View>
+            <Text style={[styles.toggleState, isDark && styles.darkToggleState]}>{hasDiscount ? 'On' : 'Off'}</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[styles.settingItem, isDark && styles.darkSettingItem, { marginBottom: 24, borderRadius: 16, backgroundColor: isDark ? '#1C1C1E' : '#FFFFFF' }]}
+            onPress={() => {
+              Haptics.selectionAsync();
+              if (onVoiceChange) onVoiceChange(!voiceEnabled);
+            }}
+            activeOpacity={0.8}
+            hitSlop={6}
+          >
+            <View style={styles.settingContent}>
+              <Text style={[styles.settingText, isDark && styles.darkSettingText]}>Voice Navigation</Text>
+              <Text style={styles.settingSubtext}>Announce turn-by-turn directions</Text>
+            </View>
+            <Text style={[styles.toggleState, isDark && styles.darkToggleState]}>{voiceEnabled ? 'On' : 'Off'}</Text>
+          </TouchableOpacity>
 
           {/* Developer Entry */}
           <Text style={styles.sectionHeader}>ADVANCED</Text>
@@ -612,4 +703,131 @@ const styles = StyleSheet.create({
   darkText: {
     color: '#FFFFFF',
   },
+  darkSubText: {
+    color: '#8E8E93',
+  },
+  darkInput: {
+    backgroundColor: '#1C1C1E',
+    borderColor: '#2C2C2E',
+    color: '#FFFFFF',
+  },
+  userInfo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 24,
+    backgroundColor: '#FFFFFF',
+    padding: 16,
+    borderRadius: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 8,
+    elevation: 3,
+  },
+  avatar: {
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+    marginRight: 16,
+  },
+  userName: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#1C1C1E',
+  },
+  userEmail: {
+    fontSize: 14,
+    color: '#8E8E93',
+  },
+  signOutBtn: {
+    marginLeft: 'auto',
+    padding: 8,
+  },
+  signOutText: {
+    color: '#FF3B30',
+    fontWeight: '600',
+  },
+  googleBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#000',
+    padding: 14,
+    borderRadius: 12,
+    marginBottom: 24,
+  },
+  googleIcon: {
+    width: 20,
+    height: 20,
+    marginRight: 12,
+  },
+  googleBtnText: {
+    color: '#1C1C1E',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  authContainer: {
+    marginBottom: 24,
+  },
+  authTitle: {
+    fontSize: 22,
+    fontWeight: '700',
+    color: '#1C1C1E',
+    marginBottom: 16,
+    textAlign: 'center',
+  },
+  inputGroup: {
+    marginBottom: 16,
+  },
+  input: {
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#E5E5EA',
+    borderRadius: 12,
+    padding: 14,
+    fontSize: 16,
+    marginBottom: 12,
+  },
+  primaryBtn: {
+    backgroundColor: '#007AFF',
+    padding: 16,
+    borderRadius: 12,
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  primaryBtnText: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  authToggleContainer: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    marginBottom: 24,
+  },
+  authToggleText: {
+    color: '#8E8E93',
+    fontSize: 14,
+  },
+  authToggleLink: {
+    color: '#007AFF',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  dividerContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 20,
+  },
+  divider: {
+    flex: 1,
+    height: 1,
+    backgroundColor: '#E5E5EA',
+  },
+  dividerText: {
+    color: '#8E8E93',
+    paddingHorizontal: 10,
+    fontSize: 12,
+    fontWeight: '600',
+  }
 });

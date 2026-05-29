@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { StyleSheet, View, Text, ActivityIndicator, LayoutAnimation, TouchableOpacity, Platform, useColorScheme, Alert, UIManager, Dimensions, ScrollView } from 'react-native';
+import { StyleSheet, View, Text, ActivityIndicator, LayoutAnimation, TouchableOpacity, Platform, useColorScheme, Alert, UIManager, Dimensions, ScrollView, DeviceEventEmitter } from 'react-native';
 import MapView, { PROVIDER_DEFAULT, Polyline, Marker } from 'react-native-maps';
 import * as Haptics from 'expo-haptics';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -10,16 +10,99 @@ import BetaDisclaimer from './components/BetaDisclaimer';
 import ProfileModal from './components/ProfileModal';
 import ReportModal from './components/ReportModal';
 import SearchBar from './components/SearchBar';
+import LoadingOverlay from './components/LoadingOverlay';
+import AuthScreen from './components/AuthScreen';
 import { MRT_STATIONS } from './utils/stations';
 import { googleMapDarkStyle } from './utils/mapStyles';
 
 import { useLocationTracking } from './hooks/useLocationTracking';
 import { useRouting } from './hooks/useRouting';
 import { useTerminals } from './hooks/useTerminals';
+import { useAuth } from './hooks/useAuth';
 
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
   UIManager.setLayoutAnimationEnabledExperimental(true);
 }
+
+const MemoizedRoutePolylines = React.memo(({ geometries, isDarkMode, selectedRouteIndex }) => {
+  return (
+    <>
+      {geometries.map((segments, index) => {
+        const isActive = index === selectedRouteIndex;
+
+        const getRouteColor = (type, category, isDark, active) => {
+          let color = '';
+          if (type === 'walk') color = isDark ? '#8E8E93' : '#A0A0A5';
+          else {
+            switch (category) {
+              case 'jeep': color = '#007AFF'; break;
+              case 'bus': color = '#34C759'; break;
+              case 'tricycle': color = '#FF9500'; break;
+              case 'uv': color = '#AF52DE'; break;
+              case 'train': color = '#5856D6'; break;
+              case 'carousel': color = '#5AC8FA'; break;
+              default: color = '#007AFF'; break;
+            }
+          }
+          return active ? color : color + '40';
+        };
+
+        return segments.map((seg, segIdx) => {
+          const passedColor = isDarkMode ? '#333333' : '#CCCCCC';
+          return (
+            <React.Fragment key={`route_${index}_seg_${segIdx}`}>
+              {seg.isPassed && (
+                <Polyline
+                  coordinates={seg.coords}
+                  strokeWidth={seg.type === 'walk' ? 4 : 6}
+                  strokeColor={passedColor}
+                  lineDashPattern={seg.type === 'walk' || seg.isDashed ? [6, 6] : null}
+                  lineCap="round"
+                  zIndex={4}
+                />
+              )}
+              {seg.isSplit && seg.passedCoords && seg.passedCoords.length > 0 && (
+                <Polyline
+                  coordinates={seg.passedCoords}
+                  strokeWidth={seg.type === 'walk' ? 4 : 6}
+                  strokeColor={passedColor}
+                  lineDashPattern={seg.type === 'walk' || seg.isDashed ? [6, 6] : null}
+                  lineCap="round"
+                  zIndex={4}
+                />
+              )}
+              {!seg.isPassed && seg.coords.length > 0 && (
+                <Polyline
+                  coordinates={seg.coords}
+                  strokeWidth={seg.type === 'walk' ? 4 : 6}
+                  strokeColor={getRouteColor(seg.type, seg.category, isDarkMode, isActive)}
+                  lineDashPattern={seg.type === 'walk' || seg.isDashed ? [6, 6] : null}
+                  lineCap="round"
+                  zIndex={isActive ? 10 : 5}
+                />
+              )}
+            </React.Fragment>
+          );
+        });
+      })}
+    </>
+  );
+}, (prevProps, nextProps) => {
+  // Deep comparison for geometries length or selected index
+  if (prevProps.selectedRouteIndex !== nextProps.selectedRouteIndex) return false;
+  if (prevProps.isDarkMode !== nextProps.isDarkMode) return false;
+
+  // A naive check: if the lengths or nested lengths are different, re-render
+  if (prevProps.geometries.length !== nextProps.geometries.length) return false;
+  for (let i = 0; i < prevProps.geometries.length; i++) {
+    if (prevProps.geometries[i].length !== nextProps.geometries[i].length) return false;
+    for (let j = 0; j < prevProps.geometries[i].length; j++) {
+      if (prevProps.geometries[i][j].isPassed !== nextProps.geometries[i][j].isPassed) return false;
+      if (prevProps.geometries[i][j].coords.length !== nextProps.geometries[i][j].coords.length) return false;
+    }
+  }
+  return true;
+});
 
 export default function App() {
   const [destination, setDestination] = useState(null);
@@ -27,7 +110,7 @@ export default function App() {
   const [profileVisible, setProfileVisible] = useState(false);
   const [devSettingsVisible, setDevSettingsVisible] = useState(false);
   const [routeDrawMode, setRouteDrawMode] = useState(false);
-  
+
   // Preview states
   const [isPreviewingPath, setIsPreviewingPath] = useState(false);
   const [previewPathVariations, setPreviewPathVariations] = useState([]);
@@ -43,9 +126,35 @@ export default function App() {
   const [drawnRoute, setDrawnRoute] = useState([]);
   const [isGpsRecording, setIsGpsRecording] = useState(false);
   const [destinationTerminal, setDestinationTerminal] = useState(null);
-  const [mapTapCounter, setMapTapCounter] = useState(0);
   const [customPaths, setCustomPaths] = useState({});
+  const isUserPanningRef = useRef(false);
+  const [activeStepIndex, setActiveStepIndex] = useState(0);
+  const [hasDiscount, setHasDiscount] = useState(false);
+  const [voiceEnabled, setVoiceEnabled] = useState(true);
+  const [sortPreference, setSortPreference] = useState('fastest');
   const mapRef = useRef(null);
+  
+  const { session, loading: authLoading } = useAuth();
+
+  useEffect(() => {
+    if (isCommuting) {
+      isUserPanningRef.current = false;
+    }
+  }, [isCommuting]);
+
+  useEffect(() => {
+    if (isCommuting && location && mapRef.current && !isUserPanningRef.current) {
+      mapRef.current.animateCamera({
+        center: {
+          latitude: location.coords.latitude,
+          longitude: location.coords.longitude,
+        },
+        pitch: 60,
+        heading: location.coords.heading || 0,
+        zoom: 18,
+      }, { duration: 1000 });
+    }
+  }, [location, isCommuting]);
 
   useEffect(() => {
     AsyncStorage.getItem('@custom_routes').then(data => {
@@ -65,7 +174,7 @@ export default function App() {
         if (stored === 'light' || stored === 'dark' || stored === 'system') {
           setThemePreference(stored);
         }
-      } catch (error) {}
+      } catch (error) { }
     };
 
     const loadPinButtonPreference = async () => {
@@ -73,32 +182,41 @@ export default function App() {
         const stored = await AsyncStorage.getItem('@show_pin_button');
         if (stored === 'true') setShowPinButton(true);
         if (stored === 'false') setShowPinButton(false);
-      } catch (error) {}
+      } catch (error) { }
+    };
+
+    const loadVoicePreference = async () => {
+      try {
+        const stored = await AsyncStorage.getItem('@voice_enabled');
+        if (stored === 'true') setVoiceEnabled(true);
+        if (stored === 'false') setVoiceEnabled(false);
+      } catch (error) { }
     };
 
     loadThemePreference();
     loadPinButtonPreference();
+    loadVoicePreference();
   }, []);
 
   const handleThemeChange = async (nextTheme) => {
     setThemePreference(nextTheme);
     try {
       await AsyncStorage.setItem('@theme_preference', nextTheme);
-    } catch (error) {}
+    } catch (error) { }
   };
 
   const handlePinButtonChange = async (nextValue) => {
     setShowPinButton(nextValue);
     try {
       await AsyncStorage.setItem('@show_pin_button', nextValue ? 'true' : 'false');
-    } catch (error) {}
+    } catch (error) { }
   };
 
-  const { location, errorMsg } = useLocationTracking();
-  
+  const { location, errorMsg } = useLocationTracking(isCommuting);
+
   // Use custom origin if set, otherwise fallback to live GPS location
-  const effectiveLocation = customOrigin 
-    ? { coords: { latitude: customOrigin.latitude, longitude: customOrigin.longitude } } 
+  const effectiveLocation = customOrigin
+    ? { coords: { latitude: customOrigin.latitude, longitude: customOrigin.longitude } }
     : location;
 
   // GPS Route Tracing
@@ -107,9 +225,9 @@ export default function App() {
       setDrawnRoute(prev => {
         const lastPoint = prev[prev.length - 1];
         // Only add if moved significantly (e.g., > 10 meters) to avoid jitter
-        if (!lastPoint || 
-            (Math.abs(lastPoint.latitude - location.coords.latitude) > 0.0001 || 
-             Math.abs(lastPoint.longitude - location.coords.longitude) > 0.0001)) {
+        if (!lastPoint ||
+          (Math.abs(lastPoint.latitude - location.coords.latitude) > 0.0001 ||
+            Math.abs(lastPoint.longitude - location.coords.longitude) > 0.0001)) {
           return [...prev, { latitude: location.coords.latitude, longitude: location.coords.longitude }];
         }
         return prev;
@@ -118,52 +236,52 @@ export default function App() {
   }, [location, isGpsRecording]);
 
   const { incidents, dbStatus, addTerminal, removeTerminal, updateTerminal } = useTerminals();
-  const { routeOptions, selectedRouteIndex, setSelectedRouteIndex, geometries, etaInfo, weatherAlert, setEtaInfo, clearRoute, isCalculating } = useRouting(effectiveLocation, destination, selectedTerminal, customPaths, incidents, mapRef);
+  const { routeOptions, selectedRouteIndex, setSelectedRouteIndex, geometries, etaInfo, weatherAlert, setEtaInfo, clearRoute, isCalculating } = useRouting(effectiveLocation, destination, selectedTerminal, customPaths, incidents, mapRef, hasDiscount, sortPreference);
 
   const savePreviewedRoute = async (selectedVariation) => {
     try {
-      const routePayload = { 
-        coordinates: selectedVariation.coordinates, 
-        isDashed: selectedVariation.isDashed, 
+      const routePayload = {
+        coordinates: selectedVariation.coordinates,
+        isDashed: selectedVariation.isDashed,
         category: selectedTerminal.category,
-        dropoffName: selectedVariation.dropoffNameStr 
+        dropoffName: selectedVariation.dropoffNameStr
       };
-      
+
       let parsed = {};
       try {
         const saved = await AsyncStorage.getItem('@custom_routes');
         if (saved) parsed = JSON.parse(saved);
-      } catch(e) { parsed = {}; }
-      
+      } catch (e) { parsed = {}; }
+
       const destId = destinationTerminal ? destinationTerminal.id : 'none';
       const routeId = `route_from_${selectedTerminal.id}_to_${destId}_${Date.now()}`;
-      
+
       let terminalPaths = selectedTerminal.custom_paths || {};
-      
+
       // Save as primary path for now (user can edit alternatives later if needed)
       if (terminalPaths[routeId] && terminalPaths[routeId].paths) {
         terminalPaths[routeId] = { ...routePayload, paths: terminalPaths[routeId].paths };
       } else {
         terminalPaths[routeId] = routePayload;
       }
-      
+
       parsed[routeId] = terminalPaths[routeId];
       await AsyncStorage.setItem('@custom_routes', JSON.stringify(parsed));
       setCustomPaths(parsed);
-      
+
       const targetDestName = destinationTerminal ? getTerminalName(destinationTerminal.route) : selectedVariation.dropoffNameStr;
       let newRouteString = selectedTerminal.route || '';
-      
+
       if (targetDestName) {
         const currentDests = newRouteString.split(/ ⇄ | ➡️ | \/ /).map(s => s.trim());
         if (!currentDests.includes(targetDestName)) {
           newRouteString = newRouteString ? `${newRouteString} ⇄ ${targetDestName}` : targetDestName;
         }
       }
-      
-      updateTerminal(selectedTerminal.id, { 
+
+      updateTerminal(selectedTerminal.id, {
         route: newRouteString,
-        custom_paths: terminalPaths 
+        custom_paths: terminalPaths
       });
 
       Alert.alert("Route Saved", `Path saved and synced to the cloud successfully!`);
@@ -194,7 +312,7 @@ export default function App() {
 
   if (!location) {
     return (
-    <View style={[styles.centerContainer, isDarkMode && styles.darkCenterContainer]}>
+      <View style={[styles.centerContainer, isDarkMode && styles.darkCenterContainer]}>
         <ActivityIndicator size="large" color="#007AFF" />
         <Text style={[styles.loadingText, isDarkMode && styles.darkLoadingText]}>Finding your location...</Text>
       </View>
@@ -228,6 +346,7 @@ export default function App() {
   };
 
   const recenterMap = () => {
+    isUserPanningRef.current = false;
     if (location && mapRef.current) {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
       mapRef.current.animateCamera({
@@ -235,13 +354,70 @@ export default function App() {
           latitude: location.coords.latitude,
           longitude: location.coords.longitude,
         },
-        pitch: 0,
-        heading: 0,
+        pitch: isCommuting ? 60 : 0,
+        heading: isCommuting ? (location.coords.heading || 0) : 0,
         altitude: 100,
         zoom: 18,
       }, { duration: 1000 });
     }
   };
+
+  const getProcessedGeometries = () => {
+    if (!geometries || geometries.length === 0) return [];
+    if (!isCommuting || !location) return geometries;
+
+    return geometries.map((segments, index) => {
+      const isActive = index === selectedRouteIndex;
+      if (!isActive) return segments;
+
+      let globalMinDist = Infinity;
+      let closestSegIdx = 0;
+      let closestPointIdx = 0;
+
+      segments.forEach((seg, sIdx) => {
+        seg.coords.forEach((c, pIdx) => {
+          const dist = Math.abs(c.latitude - location.coords.latitude) + Math.abs(c.longitude - location.coords.longitude);
+          if (dist < globalMinDist) {
+            globalMinDist = dist;
+            closestSegIdx = sIdx;
+            closestPointIdx = pIdx;
+          }
+        });
+      });
+
+      if (activeStepIndex !== closestSegIdx) {
+        setTimeout(() => setActiveStepIndex(closestSegIdx), 0);
+      }
+
+      return segments.map((seg, sIdx) => {
+        if (sIdx < closestSegIdx) {
+          return { ...seg, isPassed: true };
+        } else if (sIdx === closestSegIdx) {
+          return {
+            ...seg,
+            passedCoords: seg.coords.slice(0, closestPointIdx + 1),
+            coords: seg.coords.slice(closestPointIdx),
+            isPassed: false,
+            isSplit: true
+          };
+        } else {
+          return { ...seg, isPassed: false };
+        }
+      });
+    });
+  };
+
+  if (authLoading) {
+    return (
+      <View style={[styles.container, { justifyContent: 'center', alignItems: 'center' }]}>
+        <ActivityIndicator size="large" color="#007AFF" />
+      </View>
+    );
+  }
+
+  if (!session) {
+    return <AuthScreen isDarkMode={isDarkMode} />;
+  }
 
   return (
     <View style={styles.container}>
@@ -260,6 +436,7 @@ export default function App() {
         showsUserLocation={true}
         showsMyLocationButton={false}
         showsCompass={false}
+        onPanDrag={() => { isUserPanningRef.current = true; }}
         onPress={(e) => {
           if (routeDrawMode && !isGpsRecording) {
             const coords = e.nativeEvent.coordinate;
@@ -268,7 +445,7 @@ export default function App() {
             const coords = e.nativeEvent.coordinate;
             const updatedTerminals = [...terminalsToPin];
             updatedTerminals[pinningStep].coords = coords;
-            
+
             if (pinningStep + 1 < terminalsToPin.length) {
               setTerminalsToPin(updatedTerminals);
               setPinningStep(pinningStep + 1);
@@ -289,7 +466,7 @@ export default function App() {
               setPinningStep(0);
             }
           } else {
-            setMapTapCounter(c => c + 1);
+            DeviceEventEmitter.emit('mapTapped');
             if (selectedTerminal) setSelectedTerminal(null);
           }
         }}
@@ -306,42 +483,15 @@ export default function App() {
           <Marker
             coordinate={customOrigin}
             title={customOrigin.name || "Start Location"}
-            pinColor="#34C759" 
+            pinColor="#34C759"
           />
         )}
 
-        {geometries && geometries.map((segments, index) => {
-          const isActive = index === selectedRouteIndex;
-          
-          const getRouteColor = (type, category, isDark, active) => {
-            let color = '';
-            if (type === 'walk') color = isDark ? '#8E8E93' : '#A0A0A5';
-            else {
-              switch (category) {
-                case 'jeep': color = '#007AFF'; break;
-                case 'bus': color = '#34C759'; break;
-                case 'tricycle': color = '#FF9500'; break;
-                case 'uv': color = '#AF52DE'; break;
-                case 'train': color = '#5856D6'; break;
-                case 'carousel': color = '#5AC8FA'; break;
-                default: color = '#007AFF'; break;
-              }
-            }
-            return active ? color : color + '40'; 
-          };
-
-          return segments.map((seg, segIdx) => (
-            <Polyline
-              key={`route_${index}_seg_${segIdx}`}
-              coordinates={seg.coords}
-              strokeWidth={seg.type === 'walk' ? 4 : 6}
-              strokeColor={getRouteColor(seg.type, seg.category, isDarkMode, isActive)}
-              lineDashPattern={seg.type === 'walk' || seg.isDashed ? [6, 6] : null}
-              lineCap="round"
-              zIndex={isActive ? 10 : 5}
-            />
-          ));
-        })}
+        <MemoizedRoutePolylines
+          geometries={getProcessedGeometries()}
+          isDarkMode={isDarkMode}
+          selectedRouteIndex={selectedRouteIndex}
+        />
 
         {routeDrawMode && drawnRoute.length > 0 && !isPreviewingPath && (
           <Polyline
@@ -386,14 +536,14 @@ export default function App() {
                       `How do you want to add ${station.name}?`,
                       [
                         { text: "Cancel", style: "cancel" },
-                        { 
-                          text: "Add as Waypoint", 
+                        {
+                          text: "Add as Waypoint",
                           onPress: () => {
                             setDrawnRoute(prev => [...prev, { latitude: station.latitude, longitude: station.longitude }]);
                           }
                         },
-                        { 
-                          text: "Set as Destination", 
+                        {
+                          text: "Set as Destination",
                           onPress: () => {
                             setDestinationTerminal(station);
                             setDrawnRoute(prev => [...prev, { latitude: station.latitude, longitude: station.longitude }]);
@@ -433,14 +583,14 @@ export default function App() {
                       `How do you want to add ${getMarkerTitle(incident)}?`,
                       [
                         { text: "Cancel", style: "cancel" },
-                        { 
-                          text: "Add as Waypoint", 
+                        {
+                          text: "Add as Waypoint",
                           onPress: () => {
                             setDrawnRoute(prev => [...prev, { latitude: incident.latitude, longitude: incident.longitude }]);
                           }
                         },
-                        { 
-                          text: "Set as Destination", 
+                        {
+                          text: "Set as Destination",
                           onPress: () => {
                             setDestinationTerminal(incident);
                             setDrawnRoute(prev => [...prev, { latitude: incident.latitude, longitude: incident.longitude }]);
@@ -503,24 +653,28 @@ export default function App() {
             setDrawnRoute([{ latitude: selectedTerminal.latitude, longitude: selectedTerminal.longitude }]);
           }}
           onEtaUpdate={setEtaInfo}
-          isMapTapped={mapTapCounter}
           destination={destination}
           isDarkMode={isDarkMode}
           recenterMap={recenterMap}
           showPinButton={showPinButton}
+          activeStepIndex={activeStepIndex}
+          sortPreference={sortPreference}
+          onSortPreferenceChange={setSortPreference}
+          voiceEnabled={voiceEnabled}
           onDeleteCustomRoute={(routeId, terminalId) => {
             Alert.alert(
               "Delete Custom Path",
               "Are you sure you want to delete this custom path?",
               [
                 { text: "Cancel", style: "cancel" },
-                { text: "Delete", style: "destructive", onPress: async () => {
+                {
+                  text: "Delete", style: "destructive", onPress: async () => {
                     let parsed = {};
                     try {
                       const saved = await AsyncStorage.getItem('@custom_routes');
                       if (saved) parsed = JSON.parse(saved);
-                    } catch(e) {}
-                    
+                    } catch (e) { }
+
                     delete parsed[routeId];
                     await AsyncStorage.setItem('@custom_routes', JSON.stringify(parsed));
                     setCustomPaths(parsed);
@@ -531,7 +685,7 @@ export default function App() {
                       delete newPaths[routeId];
                       updateTerminal(terminalId, { custom_paths: newPaths });
                     }
-                    
+
                     setSelectedRouteIndex(0);
                     clearRoute();
                   }
@@ -589,11 +743,13 @@ export default function App() {
             onPress={() => {
               Alert.alert("Cancel Pinning?", "Are you sure you want to stop pinning the new terminal?", [
                 { text: "No", style: "cancel" },
-                { text: "Yes", onPress: () => {
-                  togglePinningMode(false);
-                  setTerminalsToPin([]);
-                  setPinningStep(0);
-                }}
+                {
+                  text: "Yes", onPress: () => {
+                    togglePinningMode(false);
+                    setTerminalsToPin([]);
+                    setPinningStep(0);
+                  }
+                }
               ]);
             }}
           >
@@ -619,6 +775,13 @@ export default function App() {
         onThemeChange={handleThemeChange}
         showPinButton={showPinButton}
         onPinButtonChange={handlePinButtonChange}
+        hasDiscount={hasDiscount}
+        onDiscountChange={setHasDiscount}
+        voiceEnabled={voiceEnabled}
+        onVoiceChange={(val) => {
+          setVoiceEnabled(val);
+          AsyncStorage.setItem('@voice_enabled', val ? 'true' : 'false');
+        }}
         routeDrawMode={routeDrawMode}
         onRouteDrawModeChange={(val) => {
           LayoutAnimation.configureNext(LayoutAnimation.Presets.spring);
@@ -666,22 +829,22 @@ export default function App() {
             <>
               <Text style={[styles.drawModeTitle, isDarkMode && styles.darkText]}>Route Editor</Text>
               <Text style={styles.drawModeSub}>
-                {selectedTerminal && destinationTerminal 
+                {selectedTerminal && destinationTerminal
                   ? `${getMarkerTitle(selectedTerminal)} ➡️ ${getMarkerTitle(destinationTerminal)}`
-                  : selectedTerminal 
+                  : selectedTerminal
                     ? `Tap destination on map, or press Record to trace path manually.`
                     : "Select a starting terminal marker"}
               </Text>
-              
+
               <View style={styles.drawModeActions}>
-                <TouchableOpacity 
+                <TouchableOpacity
                   style={[styles.drawBtn, isGpsRecording ? styles.drawBtnStop : styles.drawBtnStart]}
                   onPress={() => setIsGpsRecording(!isGpsRecording)}
                 >
                   <Text style={styles.drawBtnText}>{isGpsRecording ? "Stop" : "Record"}</Text>
                 </TouchableOpacity>
 
-                <TouchableOpacity 
+                <TouchableOpacity
                   style={[styles.drawBtn, styles.drawBtnClear]}
                   onPress={() => {
                     setDrawnRoute(selectedTerminal ? [{ latitude: selectedTerminal.latitude, longitude: selectedTerminal.longitude }] : []);
@@ -691,7 +854,7 @@ export default function App() {
                   <Text style={styles.drawBtnText}>Clear</Text>
                 </TouchableOpacity>
 
-                <TouchableOpacity 
+                <TouchableOpacity
                   style={[styles.drawBtn, { backgroundColor: '#FF9500' }]}
                   onPress={() => {
                     setDrawnRoute(prev => prev.length > (selectedTerminal ? 1 : 0) ? prev.slice(0, -1) : prev);
@@ -700,15 +863,15 @@ export default function App() {
                   <Text style={styles.drawBtnText}>Undo</Text>
                 </TouchableOpacity>
 
-                <TouchableOpacity 
+                <TouchableOpacity
                   style={[styles.drawBtn, styles.drawBtnSave, drawnRoute.length < 2 && styles.drawBtnDisabled]}
                   onPress={async () => {
                     if (drawnRoute.length < 2) return;
                     if (!selectedTerminal) {
-                       Alert.alert("Missing Terminal", "Please tap a starting terminal on the map first.");
-                       return;
+                      Alert.alert("Missing Terminal", "Please tap a starting terminal on the map first.");
+                      return;
                     }
-                    
+
                     let dropoffNameStr = null;
                     if (!destinationTerminal) {
                       if (Platform.OS === 'ios') {
@@ -738,19 +901,25 @@ export default function App() {
                       }
                       if (!dropoffNameStr) return;
                     }
-                    
+
                     // --- Fetch Alternatives for Preview Mode ---
-                    let pointsToSend = drawnRoute;
-                    if (drawnRoute.length > 50) {
-                      pointsToSend = drawnRoute.filter((_, i) => i % Math.ceil(drawnRoute.length / 50) === 0);
+                    let pointsToSend = [drawnRoute[0]];
+                    let lastP = drawnRoute[0];
+                    for (let i = 1; i < drawnRoute.length - 1; i++) {
+                      const p = drawnRoute[i];
+                      const dist = Math.abs(p.latitude - lastP.latitude) + Math.abs(p.longitude - lastP.longitude);
+                      if (dist > 0.005) { // approx 500m apart
+                        pointsToSend.push(p);
+                        lastP = p;
+                      }
                     }
-                    if (pointsToSend[pointsToSend.length - 1] !== drawnRoute[drawnRoute.length - 1]) {
+                    if (drawnRoute.length > 1) {
                       pointsToSend.push(drawnRoute[drawnRoute.length - 1]);
                     }
                     const coordsStr = pointsToSend.map(p => `${p.longitude},${p.latitude}`).join(';');
-                    
+
                     let variations = [];
-                    
+
                     // Add direct dashed line as fallback
                     variations.push({
                       title: "Direct Line",
@@ -759,14 +928,14 @@ export default function App() {
                       isDashed: true,
                       dropoffNameStr
                     });
-                    
+
                     try {
                       const matchRes = await axios.get(`https://router.project-osrm.org/match/v1/driving/${coordsStr}?overview=full&geometries=geojson`);
                       if (matchRes.data && matchRes.data.matchings) {
                         matchRes.data.matchings.forEach((match, idx) => {
                           const geom = match.geometry.coordinates.map(c => ({ latitude: c[1], longitude: c[0] }));
                           variations.push({
-                            title: `Road Snap ${idx > 0 ? `(Part ${idx+1})` : ''}`.trim(),
+                            title: `Road Snap ${idx > 0 ? `(Part ${idx + 1})` : ''}`.trim(),
                             badge: "Aligned",
                             coordinates: geom,
                             isDashed: false,
@@ -774,10 +943,10 @@ export default function App() {
                           });
                         });
                       }
-                    } catch(e) {
+                    } catch (e) {
                       console.log("Match API failed", e.message);
                     }
-                    
+
                     try {
                       const walkRes = await axios.get(`https://router.project-osrm.org/route/v1/walking/${coordsStr}?overview=full&geometries=geojson`);
                       if (walkRes.data && walkRes.data.routes && walkRes.data.routes[0]) {
@@ -790,8 +959,8 @@ export default function App() {
                           dropoffNameStr
                         });
                       }
-                    } catch(e) {}
-                    
+                    } catch (e) { }
+
                     try {
                       const driveRes = await axios.get(`https://router.project-osrm.org/route/v1/driving/${coordsStr}?overview=full&geometries=geojson&alternatives=true`);
                       if (driveRes.data && driveRes.data.routes) {
@@ -806,8 +975,8 @@ export default function App() {
                           });
                         });
                       }
-                    } catch(e) {}
-                    
+                    } catch (e) { }
+
                     setPreviewPathVariations(variations);
                     // Default to first snapped algorithm if available, else direct line
                     setSelectedPreviewIndex(variations.length > 1 ? 1 : 0);
@@ -818,7 +987,7 @@ export default function App() {
                   <Text style={styles.drawBtnText}>Preview</Text>
                 </TouchableOpacity>
 
-                <TouchableOpacity 
+                <TouchableOpacity
                   style={[styles.drawBtn, { backgroundColor: '#3A3A3C' }]}
                   onPress={() => {
                     LayoutAnimation.configureNext(LayoutAnimation.Presets.spring);
@@ -838,12 +1007,12 @@ export default function App() {
               <Text style={styles.drawModeSub}>
                 Tap an option below to highlight the path on the map.
               </Text>
-              
+
               <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginVertical: 12 }}>
                 {previewPathVariations.map((variation, idx) => {
                   const isActive = idx === selectedPreviewIndex;
                   return (
-                    <TouchableOpacity 
+                    <TouchableOpacity
                       key={`pill_${idx}`}
                       style={[styles.routeTab, isActive && styles.routeTabActive, { marginHorizontal: 4 }]}
                       onPress={() => setSelectedPreviewIndex(idx)}
@@ -856,14 +1025,14 @@ export default function App() {
               </ScrollView>
 
               <View style={styles.drawModeActions}>
-                <TouchableOpacity 
+                <TouchableOpacity
                   style={[styles.drawBtn, styles.drawBtnSave, { flex: 2 }]}
                   onPress={() => savePreviewedRoute(previewPathVariations[selectedPreviewIndex])}
                 >
                   <Text style={styles.drawBtnText}>Save this Path</Text>
                 </TouchableOpacity>
 
-                <TouchableOpacity 
+                <TouchableOpacity
                   style={[styles.drawBtn, { backgroundColor: '#3A3A3C', flex: 1 }]}
                   onPress={() => {
                     LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
@@ -878,7 +1047,10 @@ export default function App() {
           )}
         </View>
       )}
-    </View>
+      
+      {/* Waze-style Route Calculation Loading Screen */ }
+  <LoadingOverlay visible={isCalculating} />
+    </View >
   );
 }
 
@@ -968,7 +1140,7 @@ const styles = StyleSheet.create({
     width: 60,
     height: 60,
     borderRadius: 30,
-    backgroundColor: '#FFFFFF', 
+    backgroundColor: '#FFFFFF',
     alignItems: 'center',
     justifyContent: 'center',
     shadowColor: '#000',

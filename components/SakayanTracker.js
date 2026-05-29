@@ -15,10 +15,12 @@ import {
   Dimensions,
   useColorScheme,
   TouchableWithoutFeedback,
-  Keyboard
+  Keyboard,
+  DeviceEventEmitter
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Haptics from 'expo-haptics';
+import * as Speech from 'expo-speech';
 import { MaterialIcons } from '@expo/vector-icons';
 import { saveBoardingLog, saveCommuteHistory, getCommuteHistory, getAverageCommuteTime } from '../utils/storage';
 import ReportModal from './ReportModal';
@@ -33,7 +35,7 @@ const SNAP_HALF = 360;
 const SNAP_FULL = SCREEN_HEIGHT * 0.85;
 const SAVED_PLACES_KEY = '@saved_places_v1';
 
-export default function SakayanTracker({ currentLocation, customOrigin, selectedTerminal, onCloseTerminal, onRemoveTerminal, onDrawRoute, onOriginSelect, etaInfo, routeOptions, selectedRouteIndex, onSelectRoute, onLocationSelect, onReportIncident, onCancelRoute, onRideStateChange, onPinTerminal, onEtaUpdate, isMapTapped, destination, isDarkMode, onSheetSnapChange, recenterMap, showPinButton, onDeleteCustomRoute, weatherAlert }) {
+export default function SakayanTracker({ currentLocation, customOrigin, selectedTerminal, onCloseTerminal, onRemoveTerminal, onDrawRoute, onOriginSelect, etaInfo, routeOptions, selectedRouteIndex, onSelectRoute, onLocationSelect, onReportIncident, onCancelRoute, onRideStateChange, onPinTerminal, onEtaUpdate, destination, isDarkMode, onSheetSnapChange, recenterMap, showPinButton, onDeleteCustomRoute, weatherAlert, activeStepIndex, sortPreference, onSortPreferenceChange, voiceEnabled = true }) {
   const [isRiding, setIsRiding] = useState(false);
   const [reportVisible, setReportVisible] = useState(false);
   const [searchTarget, setSearchTarget] = useState(null); // 'origin' | 'destination'
@@ -58,8 +60,8 @@ export default function SakayanTracker({ currentLocation, customOrigin, selected
   const isDark = typeof isDarkMode === 'boolean' ? isDarkMode : colorScheme === 'dark';
 
   // Dynamic collapse height
-  // 320px fits ETA header + Leave Now button, 168px fits search dock when idle
-  const getSnapCollapsed = () => (selectedTerminal ? 320 : (etaInfo ? 320 : 168));
+  // 320px fits ETA header + Leave Now button, 168px fits search dock when idle, 180 for commute mode
+  const getSnapCollapsed = () => (isRiding ? 180 : (selectedTerminal ? 320 : (etaInfo ? 320 : 168)));
 
   // Draggable sheet
   const initialSnap = etaInfo ? SNAP_HALF : getSnapCollapsed();
@@ -125,10 +127,11 @@ export default function SakayanTracker({ currentLocation, customOrigin, selected
 
   // Collapse when map is tapped
   useEffect(() => {
-    if (isMapTapped) {
+    const sub = DeviceEventEmitter.addListener('mapTapped', () => {
       snapTo(getSnapCollapsed());
-    }
-  }, [isMapTapped]);
+    });
+    return () => sub.remove();
+  }, [snapTo, getSnapCollapsed]);
 
   // Expand when route selected
   useEffect(() => {
@@ -282,7 +285,7 @@ export default function SakayanTracker({ currentLocation, customOrigin, selected
     setSearchTarget('destination');
   };
 
-  const routeSteps = routeOptions && routeOptions.length > 0 ? routeOptions[selectedRouteIndex]?.steps : null;
+  const routeSteps = routeOptions && routeOptions.length > 0 ? routeOptions[selectedRouteIndex]?.steps : [];
 
   let mainRideMode = 'Jeepney';
   if (routeSteps) {
@@ -322,18 +325,36 @@ export default function SakayanTracker({ currentLocation, customOrigin, selected
 
   let dynamicArrivalDate = null;
   let dynamicDurationMins = 0;
-  
+
   if (etaInfo) {
     const durationMs = etaInfo.duration * 1000;
-    if (isRiding && rideStartTime) {
-       const expectedArrivalMs = rideStartTime + durationMs;
+    if (isRiding) {
+       // Recalculate ETA dynamically based on remaining steps!
+       const remainingMins = routeSteps && activeStepIndex < routeSteps.length 
+         ? routeSteps.slice(activeStepIndex).reduce((acc, step) => acc + (step.duration || 0), 0)
+         : Math.max(1, Math.round(durationMs / 60000));
+         
+       const expectedArrivalMs = currentNow + (remainingMins * 60000);
        dynamicArrivalDate = new Date(expectedArrivalMs);
-       dynamicDurationMins = Math.max(0, Math.round((expectedArrivalMs - currentNow) / 60000));
+       dynamicDurationMins = Math.max(0, remainingMins);
     } else {
        dynamicArrivalDate = new Date(currentNow + durationMs);
        dynamicDurationMins = Math.round(durationMs / 60000);
     }
   }
+
+  // Voice Navigation Trigger
+  useEffect(() => {
+    if (isRiding && routeSteps && activeStepIndex < routeSteps.length) {
+      const currentStep = routeSteps[activeStepIndex];
+      if (currentStep && currentStep.instruction !== lastSpokenInstruction.current) {
+        lastSpokenInstruction.current = currentStep.instruction;
+        if (voiceEnabled) {
+          Speech.speak(currentStep.instruction, { rate: 0.9 });
+        }
+      }
+    }
+  }, [activeStepIndex, isRiding]);
 
   const getArrivalTime = (dateObj) => {
     if (!dateObj) return '';
@@ -347,7 +368,26 @@ export default function SakayanTracker({ currentLocation, customOrigin, selected
     >
       
       {/* Native Floating Buttons - automatically track sheet height and fade out on expand */}
-      {!isRiding && (
+      {isRiding && routeSteps && (
+        (() => {
+          const currentStep = activeStepIndex < routeSteps.length ? routeSteps[activeStepIndex] : routeSteps[routeSteps.length - 1];
+          return currentStep ? (
+            <View style={[styles.topInstructionBanner, isDark && styles.darkTopInstructionBanner]}>
+              <Text style={{ fontSize: 32, marginRight: 16 }}>{currentStep.icon}</Text>
+              <View style={{ flex: 1 }}>
+                <Text style={[styles.topInstructionLabel, isDark && styles.darkDistanceText]}>
+                  {currentStep.duration} MIN {currentStep.type.toUpperCase()}
+                </Text>
+                <Text style={[styles.topInstructionText, isDark && styles.darkText]} numberOfLines={2}>
+                  {currentStep.instruction}
+                </Text>
+              </View>
+            </View>
+          ) : null;
+        })()
+      )}
+
+
         <Animated.View style={[styles.recenterContainer, { bottom: recenterBottom, opacity: floatingOpacity }]}>
           <TouchableOpacity onPress={recenterMap} activeOpacity={0.7} hitSlop={10}>
             <View style={[styles.devGearBlur, isDark && styles.darkDevGearBlur, { padding: 12 }]}>
@@ -355,8 +395,6 @@ export default function SakayanTracker({ currentLocation, customOrigin, selected
             </View>
           </TouchableOpacity>
         </Animated.View>
-      )}
-
       {!isRiding && showPinButton && (
         <Animated.View style={[styles.floatingPinContainer, { bottom: pinBottom, opacity: floatingOpacity }]}>
           <TouchableOpacity onPress={onPinTerminal} activeOpacity={0.8} hitSlop={10}>
@@ -389,41 +427,60 @@ export default function SakayanTracker({ currentLocation, customOrigin, selected
               }
             ]}>
               <View style={styles.stickyHeaderRow}>
-                <View style={styles.stickyHeaderLeft}>
-                  <View style={styles.etaRow}>
-                    <Text style={[styles.etaText, isDark && styles.darkEtaText, isRiding && styles.commuteEtaText]}>
-                      {getArrivalTime(dynamicArrivalDate)}
-                    </Text>
-                    {weatherAlert && !isRiding && (
-                      <View style={{ zIndex: 100 }}>
-                        {isWeatherVisible && (
-                          <Animated.View style={[
-                            styles.weatherSpeechBubble, 
-                            isDark && styles.darkWeatherSpeechBubble,
-                            {
-                              opacity: weatherAnim,
-                              transform: [
-                                { scale: weatherAnim },
-                                { translateY: weatherAnim.interpolate({ inputRange: [0, 1], outputRange: [15, 0] }) }
-                              ]
-                            }
-                          ]}>
-                            <Text style={[styles.weatherPillText, isDark && styles.darkWeatherPillText]}>
-                              {weatherAlert.message || 'Weather alert'}
-                            </Text>
-                            <View style={[styles.weatherSpeechTriangle, isDark && styles.darkWeatherSpeechTriangle]} />
-                          </Animated.View>
-                        )}
-                        <TouchableOpacity 
-                          style={[styles.weatherPill, isDark && styles.darkWeatherPill]}
-                          onPress={toggleWeatherBubble}
-                          activeOpacity={0.8}
-                        >
-                          <Text style={styles.weatherPillIcon}>{weatherAlert.icon || '☁️'}</Text>
-                        </TouchableOpacity>
-                      </View>
-                    )}
-                    {!isRiding && (
+                {isRiding ? (
+                  <View style={{ flex: 1, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                    <View style={{ flex: 1 }}>
+                      <Text style={[styles.etaText, isDark && styles.darkEtaText, { fontSize: 36, color: '#34C759' }]}>
+                        {dynamicDurationMins} <Text style={{ fontSize: 18, color: isDark ? '#A0A0A5' : '#8E8E93' }}>min</Text>
+                      </Text>
+                      <Text style={[styles.distanceText, isDark && styles.darkDistanceText, { fontSize: 16, marginTop: 4 }]}>
+                        {getArrivalTime(dynamicArrivalDate)} • {etaInfo.distance} km
+                      </Text>
+                    </View>
+                    <View style={{ alignItems: 'flex-end', justifyContent: 'center', paddingRight: 8 }}>
+                      <Text style={[styles.etaText, isDark && styles.darkText, { fontSize: 32 }]}>
+                        {currentLocation?.coords?.speed && currentLocation.coords.speed > 0 
+                          ? Math.round(currentLocation.coords.speed * 3.6) 
+                          : 0} 
+                        <Text style={{ fontSize: 14, color: isDark ? '#A0A0A5' : '#8E8E93' }}> km/h</Text>
+                      </Text>
+                    </View>
+                  </View>
+                ) : (
+                  <View style={styles.stickyHeaderLeft}>
+                    <View style={styles.etaRow}>
+                      <Text style={[styles.etaText, isDark && styles.darkEtaText]}>
+                        {getArrivalTime(dynamicArrivalDate)}
+                      </Text>
+                      {weatherAlert && (
+                        <View style={{ zIndex: 100 }}>
+                          {isWeatherVisible && (
+                            <Animated.View style={[
+                              styles.weatherSpeechBubble, 
+                              isDark && styles.darkWeatherSpeechBubble,
+                              {
+                                opacity: weatherAnim,
+                                transform: [
+                                  { scale: weatherAnim },
+                                  { translateY: weatherAnim.interpolate({ inputRange: [0, 1], outputRange: [15, 0] }) }
+                                ]
+                              }
+                            ]}>
+                              <Text style={[styles.weatherPillText, isDark && styles.darkWeatherPillText]}>
+                                {weatherAlert.message || 'Weather alert'}
+                              </Text>
+                              <View style={[styles.weatherSpeechTriangle, isDark && styles.darkWeatherSpeechTriangle]} />
+                            </Animated.View>
+                          )}
+                          <TouchableOpacity 
+                            style={[styles.weatherPill, isDark && styles.darkWeatherPill]}
+                            onPress={toggleWeatherBubble}
+                            activeOpacity={0.8}
+                          >
+                            <Text style={styles.weatherPillIcon}>{weatherAlert.icon || '☁️'}</Text>
+                          </TouchableOpacity>
+                        </View>
+                      )}
                       <TouchableOpacity 
                         style={[styles.editEtaBtn, isDark && styles.darkEditEtaBtn]}
                         onPress={() => {
@@ -435,14 +492,14 @@ export default function SakayanTracker({ currentLocation, customOrigin, selected
                       >
                         <Text style={[styles.editEtaText, isDark && styles.darkEditEtaText]}>✎</Text>
                       </TouchableOpacity>
-                    )}
+                    </View>
+                    <Text style={[styles.distanceText, isDark && styles.darkDistanceText]}>
+                      {dynamicDurationMins} min • {etaInfo.distance} km • ₱{suggestedFare}
+                      {avgTime ? ` • Avg: ${avgTime}m` : ''}
+                    </Text>
+                    <Text style={[styles.destinationTitle, isDark && styles.darkDestinationTitle]} numberOfLines={1}>To: {etaInfo.destinationName}</Text>
                   </View>
-                  <Text style={[styles.distanceText, isDark && styles.darkDistanceText]}>
-                    {dynamicDurationMins} min • {etaInfo.distance} km • ₱{suggestedFare}
-                    {avgTime ? ` • Avg: ${avgTime}m` : ''}
-                  </Text>
-                  <Text style={[styles.destinationTitle, isDark && styles.darkDestinationTitle]} numberOfLines={1}>To: {etaInfo.destinationName}</Text>
-                </View>
+                )}
                 {!isRiding && (
                   <TouchableOpacity style={[styles.minimalCancelBtn, isDark && styles.darkMinimalCancelBtn]} onPress={() => {
                     Haptics.selectionAsync();
@@ -452,6 +509,7 @@ export default function SakayanTracker({ currentLocation, customOrigin, selected
                   </TouchableOpacity>
                 )}
               </View>
+
 
               {/* Sticky Action Button */}
               <TouchableOpacity 
@@ -661,51 +719,92 @@ export default function SakayanTracker({ currentLocation, customOrigin, selected
 
             {/* Route Tabs (when route is active) */}
             {routeOptions && routeOptions.length > 1 && !isRiding && (
-              <ScrollView 
-                horizontal 
-                showsHorizontalScrollIndicator={false} 
-                style={styles.routeTabsContainer}
-                contentContainerStyle={{ paddingHorizontal: 20 }}
-              >
-                {routeOptions.map((option, index) => {
-                  const isActive = index === selectedRouteIndex;
-                  return (
+              <View>
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 20, marginBottom: 8, marginTop: 4 }}>
+                  <Text style={[styles.sectionHeader, { marginLeft: 0, marginBottom: 0 }]}>AVAILABLE ROUTES</Text>
+                  <View style={{ flexDirection: 'row', backgroundColor: isDark ? '#2C2C2E' : '#E5E5EA', borderRadius: 8, padding: 2 }}>
                     <TouchableOpacity 
-                      key={option.id} 
-                      style={[styles.routeTab, isActive && styles.routeTabActive]}
-                      onPress={() => {
-                        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                        if (onSelectRoute) onSelectRoute(index);
-                      }}
+                      style={[{ paddingHorizontal: 12, paddingVertical: 4, borderRadius: 6 }, sortPreference === 'fastest' && { backgroundColor: isDark ? '#3A3A3C' : '#FFFFFF' }]}
+                      onPress={() => onSortPreferenceChange('fastest')}
                     >
-                      <Text style={[styles.routeTabText, isActive && styles.routeTabTextActive]}>
-                        {option.title}
-                      </Text>
-                      <Text style={[styles.routeTabBadge, isActive && styles.routeTabBadgeActive]}>
-                        {option.badge}
-                      </Text>
-                      {option.isCustom && isActive && (
-                        <TouchableOpacity 
-                           onPress={(e) => {
-                             e.stopPropagation();
-                             if (onDeleteCustomRoute) onDeleteCustomRoute(option.routeId, option.terminalId);
-                           }}
-                           style={{ marginLeft: 8 }}
-                           hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-                        >
-                          <MaterialIcons name="delete" size={18} color={isDark ? '#FF453A' : '#FF3B30'} />
-                        </TouchableOpacity>
-                      )}
+                      <Text style={{ fontSize: 12, fontWeight: '600', color: sortPreference === 'fastest' ? (isDark ? '#FFF' : '#000') : '#8E8E93' }}>Fastest</Text>
                     </TouchableOpacity>
-                  );
-                })}
-              </ScrollView>
+                    <TouchableOpacity 
+                      style={[{ paddingHorizontal: 12, paddingVertical: 4, borderRadius: 6 }, sortPreference === 'cheapest' && { backgroundColor: isDark ? '#3A3A3C' : '#FFFFFF' }]}
+                      onPress={() => onSortPreferenceChange('cheapest')}
+                    >
+                      <Text style={{ fontSize: 12, fontWeight: '600', color: sortPreference === 'cheapest' ? (isDark ? '#FFF' : '#000') : '#8E8E93' }}>Cheapest</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+                <ScrollView 
+                  horizontal 
+                  showsHorizontalScrollIndicator={false} 
+                  style={styles.routeCardsContainer}
+                  contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: 12 }}
+                  decelerationRate="fast"
+                  snapToInterval={222} // Width + margin
+                >
+                  {routeOptions.map((option, index) => {
+                    const isActive = index === selectedRouteIndex;
+                    return (
+                      <TouchableOpacity 
+                        key={option.id} 
+                        style={[styles.routeCard, isActive && styles.routeCardActive, isDark && styles.darkRouteCard, isDark && isActive && styles.darkRouteCardActive]}
+                        onPress={() => {
+                          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                          if (onSelectRoute) {
+                            onSelectRoute(index);
+                          }
+                        }}
+                        activeOpacity={0.9}
+                      >
+                        <View style={styles.routeCardHeader}>
+                          <Text style={[styles.routeCardTitle, isActive && styles.routeCardTitleActive, isDark && !isActive && styles.darkText]} numberOfLines={1}>
+                            {option.title}
+                          </Text>
+                          {option.badge && (
+                            <View style={[styles.routeCardBadge, isActive && styles.routeCardBadgeActive]}>
+                              <Text style={[styles.routeCardBadgeText, isActive && styles.routeCardBadgeTextActive]}>{option.badge}</Text>
+                            </View>
+                          )}
+                        </View>
+                        
+                        <View style={styles.routeCardMetrics}>
+                          <Text style={[styles.routeCardEta, isActive && styles.routeCardEtaActive, isDark && !isActive && styles.darkText]}>
+                            {option.durationMins} <Text style={{fontSize: 14, fontWeight: '600'}}>min</Text>
+                          </Text>
+                        </View>
+                        
+                        <View style={styles.routeCardFooter}>
+                          <Text style={[styles.routeCardSubText, isActive && styles.routeCardSubTextActive, isDark && !isActive && styles.darkDistanceText]}>
+                            {option.distance} km • ₱{option.suggestedFare || '--'}
+                          </Text>
+                          {option.isCustom && isActive && (
+                            <TouchableOpacity 
+                               onPress={(e) => {
+                                 e.stopPropagation();
+                                 if (onDeleteCustomRoute) onDeleteCustomRoute(option.routeId, option.terminalId);
+                               }}
+                               hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                            >
+                              <MaterialIcons name="delete" size={18} color="#FF3B30" />
+                            </TouchableOpacity>
+                          )}
+                        </View>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </ScrollView>
+              </View>
             )}
 
             {/* Sakay.ph Style Route List */}
-            {routeSteps && !isRiding && (
-              <View style={styles.routeContainer}>
-                <RouteList steps={routeSteps} />
+            {routeSteps && destination && !isRiding && (
+              <View style={styles.routeDetailsContainer}>
+                <View style={[styles.routeListWrapper, isDark && styles.darkRouteListWrapper]}>
+                  <RouteList steps={routeSteps} isDarkMode={isDark} />
+                </View>
               </View>
             )}
             </ScrollView>
@@ -893,6 +992,37 @@ const styles = StyleSheet.create({
   // --- Dark Mode Overrides ---
   darkBottomSheet: {
     backgroundColor: '#1C1C1E',
+  },
+  topInstructionBanner: {
+    position: 'absolute',
+    left: 16,
+    right: 16,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    padding: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.15,
+    shadowRadius: 12,
+    elevation: 8,
+    zIndex: 100,
+    top: Platform.OS === 'ios' ? 60 : 40,
+  },
+  darkTopInstructionBanner: {
+    backgroundColor: '#2C2C2E',
+  },
+  topInstructionLabel: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#8E8E93',
+    marginBottom: 4,
+  },
+  topInstructionText: {
+    fontSize: 22,
+    fontWeight: '800',
+    color: '#1C1C1E',
   },
   darkGrabber: {
     backgroundColor: '#3A3A3C',
@@ -1170,6 +1300,139 @@ const styles = StyleSheet.create({
     color: '#007AFF',
     backgroundColor: '#FFFFFF',
   },
+  // --- New Route Cards UI Styles ---
+  routeCardsContainer: {
+    paddingTop: 8,
+  },
+  routeCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 20,
+    padding: 16,
+    marginRight: 12,
+    width: 210,
+    borderWidth: 1,
+    borderColor: '#E5E5EA',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.05,
+    shadowRadius: 8,
+    elevation: 2,
+  },
+  darkRouteCard: {
+    backgroundColor: '#1C1C1E',
+    borderColor: '#2C2C2E',
+  },
+  routeCardActive: {
+    borderColor: '#007AFF',
+    borderWidth: 2,
+    backgroundColor: '#F2F6FF',
+    shadowOpacity: 0.1,
+    elevation: 4,
+  },
+  darkRouteCardActive: {
+    borderColor: '#0A84FF',
+    backgroundColor: '#1A2433',
+  },
+  routeCardHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  routeCardTitle: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#3A3A3C',
+    flex: 1,
+  },
+  routeCardTitleActive: {
+    color: '#007AFF',
+  },
+  routeCardBadge: {
+    backgroundColor: '#E5E5EA',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 6,
+    marginLeft: 8,
+  },
+  routeCardBadgeActive: {
+    backgroundColor: '#007AFF',
+  },
+  routeCardBadgeText: {
+    fontSize: 10,
+    fontWeight: '800',
+    color: '#8E8E93',
+    textTransform: 'uppercase',
+  },
+  routeCardBadgeTextActive: {
+    color: '#FFFFFF',
+  },
+  routeCardMetrics: {
+    marginBottom: 8,
+  },
+  routeCardEta: {
+    fontSize: 28,
+    fontWeight: '900',
+    color: '#1C1C1E',
+  },
+  routeCardEtaActive: {
+    color: '#007AFF',
+  },
+  routeCardFooter: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(0,0,0,0.05)',
+    paddingTop: 8,
+  },
+  routeCardSubText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#8E8E93',
+  },
+  routeCardSubTextActive: {
+    color: '#007AFF',
+  },
+  routeDetailsContainer: {
+    marginTop: 8,
+    paddingHorizontal: 20,
+    marginBottom: 20,
+  },
+  viewDetailsBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#F2F2F7',
+    paddingVertical: 12,
+    borderRadius: 14,
+  },
+  darkViewDetailsBtn: {
+    backgroundColor: '#2C2C2E',
+  },
+  viewDetailsText: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#007AFF',
+    marginRight: 4,
+  },
+  darkViewDetailsText: {
+    color: '#0A84FF',
+  },
+  routeListWrapper: {
+    marginTop: 12,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 20,
+    padding: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 10,
+    elevation: 2,
+  },
+  darkRouteListWrapper: {
+    backgroundColor: '#1C1C1E',
+  },
   routeContainer: {
     marginBottom: 8,
   },
@@ -1381,11 +1644,8 @@ const styles = StyleSheet.create({
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.05,
-    shadowRadius: 10,
-    elevation: 2,
-  },
-  darkRecentHistoryCard: {
-    backgroundColor: '#1C1C1E',
+    shadowRadius: 12,
+    elevation: 6,
   },
   recentHistoryTitle: {
     fontSize: 13,

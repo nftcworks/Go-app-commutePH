@@ -59,7 +59,20 @@ export default function SearchBar({ onLocationSelect, onFocus, onBlur, isDarkMod
         console.error('Error fetching locations:', error);
       }
       setLoading(false);
-    }, 500); // 500ms debounce
+    }, 300); // 300ms debounce for snappier feel
+  };
+
+  const getPlaceIcon = (type) => {
+    switch (type) {
+      case 'commercial': return '🏢';
+      case 'residential': return '🏠';
+      case 'university': return '🎓';
+      case 'hospital': return '🏥';
+      case 'park': return '🌳';
+      case 'station': return '🚉';
+      case 'bus_stop': return '🚏';
+      default: return '📍';
+    }
   };
 
   const handleSelect = async (item) => {
@@ -123,11 +136,14 @@ export default function SearchBar({ onLocationSelect, onFocus, onBlur, isDarkMod
             keyboardShouldPersistTaps="handled"
             renderItem={({ item }) => (
               <View style={[styles.resultItem, isDark && styles.darkResultItem]}>
-                <TouchableOpacity style={{ flex: 1 }} onPress={() => handleSelect(item)} activeOpacity={0.7} hitSlop={6}>
-                  <Text style={[styles.resultText, isDark && styles.darkInput]} numberOfLines={1}>
-                    {item.display_name.split(',')[0]}
-                  </Text>
-                  <Text style={styles.resultSubtext} numberOfLines={1}>{item.display_name}</Text>
+                <TouchableOpacity style={{ flex: 1, flexDirection: 'row', alignItems: 'center' }} onPress={() => handleSelect(item)} activeOpacity={0.7} hitSlop={6}>
+                  <Text style={styles.placeIcon}>{query.length > 0 ? getPlaceIcon(item.type) : '🕒'}</Text>
+                  <View style={{ flex: 1 }}>
+                    <Text style={[styles.resultText, isDark && styles.darkInput]} numberOfLines={1}>
+                      {item.display_name.split(',')[0]}
+                    </Text>
+                    <Text style={styles.resultSubtext} numberOfLines={1}>{item.display_name}</Text>
+                  </View>
                 </TouchableOpacity>
                 {query.length === 0 && (
                   <TouchableOpacity style={styles.removeHistoryBtn} onPress={() => handleRemoveHistory(item.place_id)} hitSlop={10}>
@@ -234,6 +250,10 @@ const styles = StyleSheet.create({
     color: '#1C1C1E',
     fontFamily: 'System',
     marginBottom: 2,
+  },
+  placeIcon: {
+    fontSize: 20,
+    marginRight: 12,
   },
   resultSubtext: {
     fontSize: 12,
