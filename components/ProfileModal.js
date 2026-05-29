@@ -150,7 +150,7 @@ export default function ProfileModal({
   ];
 
   return (
-    <Modal visible={visible} animationType="slide">
+    <Modal visible={visible} animationType="slide" statusBarTranslucent={true}>
       <View style={[styles.fullScreenView, isDark && styles.darkFullScreenView]}>
         
         <View style={[styles.headerRow, isDark && styles.darkHeaderRow]}>
@@ -349,7 +349,7 @@ export default function ProfileModal({
       </View>
 
       {/* Nested Modal: Path Manager */}
-      <Modal visible={showPathManager} animationType="slide">
+      <Modal visible={showPathManager} animationType="slide" statusBarTranslucent={true}>
         <View style={[styles.fullScreenView, isDark && styles.darkFullScreenView]}>
           <View style={[styles.headerRow, isDark && styles.darkHeaderRow]}>
             <Text style={[styles.title, isDark && styles.darkTitle]}>Custom Paths</Text>

@@ -47,7 +47,7 @@ export default function DeveloperSettings({
   ];
 
   return (
-    <Modal visible={visible} animationType="slide">
+    <Modal visible={visible} animationType="slide" statusBarTranslucent={true}>
       <View style={[styles.fullScreenView, isDark && styles.darkFullScreenView]}>
         
         <View style={[styles.headerRow, isDark && styles.darkHeaderRow]}>

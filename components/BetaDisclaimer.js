@@ -23,7 +23,7 @@ export default function BetaDisclaimer() {
   };
 
   return (
-    <Modal visible={visible} transparent animationType="fade">
+    <Modal visible={visible} transparent animationType="fade" statusBarTranslucent={true}>
       <View style={styles.absolute}>
         <View style={styles.alertBox}>
           <View style={styles.contentContainer}>

@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, TextInput, ActivityIndicator, Platform, Image, SafeAreaView } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, TextInput, ActivityIndicator, Platform, Image, SafeAreaView, Modal, Alert } from 'react-native';
 import { KeyboardAwareScrollView } from 'react-native-keyboard-aware-scroll-view';
 import * as Haptics from 'expo-haptics';
 import { useAuth } from '../hooks/useAuth';
@@ -10,8 +10,18 @@ export default function AuthScreen({ isDarkMode }) {
   const [authMode, setAuthMode] = useState('login'); // 'login' or 'register'
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
   const [nickname, setNickname] = useState('');
   const [showEmailForm, setShowEmailForm] = useState(false);
+  
+  // Validation States
+  const [passwordError, setPasswordError] = useState('');
+  const [confirmError, setConfirmError] = useState('');
+  
+  // Modals
+  const [showSuccessModal, setShowSuccessModal] = useState(false);
+  const [showErrorModal, setShowErrorModal] = useState(false);
+  const [errorModalMessage, setErrorModalMessage] = useState('');
 
   const handleSignIn = async () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -22,13 +32,31 @@ export default function AuthScreen({ isDarkMode }) {
 
   const handleEmailAuth = async () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    
+    // Clear previous errors
+    setPasswordError('');
+    setConfirmError('');
+    
     if (!email || !password) {
-      alert('Please enter both email and password.');
+      setErrorModalMessage('Please enter both email and password.');
+      setShowErrorModal(true);
       return;
     }
-    if (authMode === 'register' && !nickname) {
-      alert('Please enter a nickname.');
-      return;
+    
+    if (authMode === 'register') {
+      if (!nickname) {
+        setErrorModalMessage('Please enter a nickname.');
+        setShowErrorModal(true);
+        return;
+      }
+      if (password.length < 6) {
+        setPasswordError('Password is too short or weak. Minimum 6 characters.');
+        return;
+      }
+      if (password !== confirmPassword) {
+        setConfirmError('Passwords do not match.');
+        return;
+      }
     }
 
     setIsAuthLoading(true);
@@ -38,12 +66,13 @@ export default function AuthScreen({ isDarkMode }) {
     } else {
       result = await signUpWithEmail(email, password, nickname);
       if (result.data?.user && !result.data?.session) {
-        alert('Success! Check your email to confirm your account!');
+        setShowSuccessModal(true);
       }
     }
     
     if (result.error) {
-      alert(result.error.message);
+      setErrorModalMessage(result.error.message);
+      setShowErrorModal(true);
     }
     setIsAuthLoading(false);
   };
@@ -90,10 +119,18 @@ export default function AuthScreen({ isDarkMode }) {
           ) : (
             <View style={styles.emailForm}>
               <View style={styles.tabContainer}>
-                <TouchableOpacity onPress={() => setAuthMode('login')}>
+                <TouchableOpacity onPress={() => {
+                  setAuthMode('login');
+                  setPasswordError('');
+                  setConfirmError('');
+                }}>
                   <Text style={[styles.tabText, authMode === 'login' && styles.activeTabText, authMode === 'login' && isDarkMode && styles.darkText]}>Log In</Text>
                 </TouchableOpacity>
-                <TouchableOpacity onPress={() => setAuthMode('register')}>
+                <TouchableOpacity onPress={() => {
+                  setAuthMode('register');
+                  setPasswordError('');
+                  setConfirmError('');
+                }}>
                   <Text style={[styles.tabText, authMode === 'register' && styles.activeTabText, authMode === 'register' && isDarkMode && styles.darkText]}>Sign Up</Text>
                 </TouchableOpacity>
               </View>
@@ -119,14 +156,49 @@ export default function AuthScreen({ isDarkMode }) {
                 keyboardType="email-address"
               />
               
-              <TextInput
-                style={[styles.input, isDarkMode && styles.darkInput]}
-                placeholder="Password"
-                placeholderTextColor={isDarkMode ? '#666' : '#999'}
-                value={password}
-                onChangeText={setPassword}
-                secureTextEntry
-              />
+              <View>
+                <TextInput
+                  style={[
+                    styles.input, 
+                    isDarkMode && styles.darkInput,
+                    passwordError ? styles.inputError : null
+                  ]}
+                  placeholder="Password"
+                  placeholderTextColor={isDarkMode ? '#666' : '#999'}
+                  value={password}
+                  onChangeText={(text) => {
+                    setPassword(text);
+                    if (passwordError) setPasswordError('');
+                  }}
+                  secureTextEntry
+                />
+                {!!passwordError && (
+                  <Text style={styles.errorInlineText}>{passwordError}</Text>
+                )}
+              </View>
+
+              {authMode === 'register' && (
+                <View>
+                  <TextInput
+                    style={[
+                      styles.input, 
+                      isDarkMode && styles.darkInput,
+                      confirmError ? styles.inputError : null
+                    ]}
+                    placeholder="Confirm Password"
+                    placeholderTextColor={isDarkMode ? '#666' : '#999'}
+                    value={confirmPassword}
+                    onChangeText={(text) => {
+                      setConfirmPassword(text);
+                      if (confirmError) setConfirmError('');
+                    }}
+                    secureTextEntry
+                  />
+                  {!!confirmError && (
+                    <Text style={styles.errorInlineText}>{confirmError}</Text>
+                  )}
+                </View>
+              )}
 
               <TouchableOpacity style={styles.submitBtn} onPress={handleEmailAuth} disabled={isAuthLoading}>
                 {isAuthLoading ? (
@@ -150,6 +222,72 @@ export default function AuthScreen({ isDarkMode }) {
           )}
         </View>
       </KeyboardAwareScrollView>
+
+      {/* Beautiful Success Modal */}
+      <Modal
+        animationType="fade"
+        transparent={true}
+        visible={showSuccessModal}
+        onRequestClose={() => setShowSuccessModal(false)}
+        statusBarTranslucent={true}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalContent, isDarkMode && styles.darkModalContent]}>
+            <View style={styles.modalIconContainer}>
+              <Image 
+                source={{ uri: 'https://cdn-icons-png.flaticon.com/512/3178/3178158.png' }} 
+                style={styles.modalIcon} 
+              />
+            </View>
+            <Text style={[styles.modalTitle, isDarkMode && styles.darkText]}>Check Your Email</Text>
+            <Text style={styles.modalText}>
+              We've sent a secure confirmation link to <Text style={{fontWeight: '700'}}>{email}</Text>. Please tap the link to activate your account!
+            </Text>
+            <Text style={[styles.modalSubText, isDarkMode && styles.darkSubText]}>
+              (Don't forget to check your spam folder)
+            </Text>
+            <TouchableOpacity 
+              style={styles.modalBtn} 
+              onPress={() => {
+                setShowSuccessModal(false);
+                setAuthMode('login');
+              }}
+            >
+              <Text style={styles.modalBtnText}>Got it!</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Beautiful Error Modal */}
+      <Modal
+        animationType="fade"
+        transparent={true}
+        visible={showErrorModal}
+        onRequestClose={() => setShowErrorModal(false)}
+        statusBarTranslucent={true}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalContent, isDarkMode && styles.darkModalContent]}>
+            <View style={[styles.modalIconContainer, { backgroundColor: '#FFEBEE' }]}>
+              <Image 
+                source={{ uri: 'https://cdn-icons-png.flaticon.com/512/1828/1828843.png' }} 
+                style={[styles.modalIcon, { tintColor: '#FF3B30' }]} 
+              />
+            </View>
+            <Text style={[styles.modalTitle, isDarkMode && styles.darkText]}>Authentication Error</Text>
+            <Text style={styles.modalText}>
+              {errorModalMessage}
+            </Text>
+            <TouchableOpacity 
+              style={[styles.modalBtn, { backgroundColor: '#FF3B30', marginTop: 16 }]} 
+              onPress={() => setShowErrorModal(false)}
+            >
+              <Text style={styles.modalBtnText}>Dismiss</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -313,5 +451,85 @@ const styles = StyleSheet.create({
     color: '#999999',
     fontSize: 14,
     fontWeight: '600',
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 24,
+  },
+  modalContent: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 32,
+    padding: 32,
+    width: '100%',
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.1,
+    shadowRadius: 20,
+    elevation: 10,
+  },
+  darkModalContent: {
+    backgroundColor: '#1C1C1E',
+  },
+  modalIconContainer: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    backgroundColor: '#E6F4FE',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 24,
+  },
+  modalIcon: {
+    width: 40,
+    height: 40,
+    tintColor: '#007AFF',
+  },
+  modalTitle: {
+    fontSize: 24,
+    fontWeight: '800',
+    color: '#000000',
+    marginBottom: 12,
+    textAlign: 'center',
+  },
+  modalText: {
+    fontSize: 16,
+    color: '#666666',
+    textAlign: 'center',
+    lineHeight: 24,
+    marginBottom: 12,
+  },
+  modalSubText: {
+    fontSize: 14,
+    color: '#999999',
+    textAlign: 'center',
+    marginBottom: 32,
+  },
+  modalBtn: {
+    backgroundColor: '#007AFF',
+    borderRadius: 24,
+    paddingVertical: 16,
+    width: '100%',
+    alignItems: 'center',
+  },
+  modalBtnText: {
+    color: '#FFFFFF',
+    fontSize: 17,
+    fontWeight: '700',
+  },
+  inputError: {
+    borderColor: '#FF3B30',
+    borderWidth: 1.5,
+  },
+  errorInlineText: {
+    color: '#FF3B30',
+    fontSize: 12,
+    fontWeight: '500',
+    marginTop: -10,
+    marginBottom: 16,
+    marginLeft: 4,
   },
 });

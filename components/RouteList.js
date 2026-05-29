@@ -9,6 +9,7 @@ export default function RouteList({ steps, isDarkMode, activeStepIndex = -1 }) {
       {steps.map((step, index) => {
         const isActive = activeStepIndex === index;
         const isPast = activeStepIndex > index;
+        const isWalk = step.type === 'walk' || step.instruction.toLowerCase().includes('walk');
         
         return (
           <View key={step.id} style={[styles.stepRow, isPast && styles.pastStepRow]}>

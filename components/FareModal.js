@@ -22,7 +22,7 @@ export default function FareModal({ visible, onClose, onSubmit, suggestedFare = 
   };
 
   return (
-    <Modal visible={visible} transparent animationType="fade">
+    <Modal visible={visible} transparent animationType="fade" statusBarTranslucent={true}>
       <View style={styles.absolute}>
         <View style={[styles.alertBox, isDark && styles.darkAlertBox]}>
           <Text style={[styles.title, isDark && styles.darkTitle]}>Commute Ended</Text>

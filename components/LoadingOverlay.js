@@ -27,7 +27,7 @@ export default function LoadingOverlay({ visible }) {
   if (!visible) return null;
 
   return (
-    <Modal transparent visible={visible} animationType="fade">
+    <Modal transparent visible={visible} animationType="fade" statusBarTranslucent={true}>
       <View style={styles.overlay}>
         <View style={styles.container}>
           <View style={styles.spinnerContainer}>

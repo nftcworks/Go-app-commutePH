@@ -1,0 +1,40 @@
+name: Build Android Dev Client APK
+
+on:
+  workflow_dispatch: # Allows manual triggering from GitHub Actions tab
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Java
+        uses: actions/setup-java@v3
+        with:
+          distribution: 'zulu'
+          java-version: '17'
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20.x
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Generate Android project (Prebuild)
+        run: npx expo prebuild -p android --clean
+
+      - name: Build Android APK
+        run: |
+          cd android
+          chmod +x gradlew
+          ./gradlew assembleDebug
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: GoCommutePH-DevClient-apk
+          path: android/app/build/outputs/apk/debug/app-debug.apk

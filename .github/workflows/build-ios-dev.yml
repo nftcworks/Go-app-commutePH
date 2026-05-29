@@ -1,0 +1,92 @@
+name: Build Unsigned iOS Dev Client IPA
+
+on:
+  workflow_dispatch: # Allows manual triggering from GitHub Actions tab
+
+jobs:
+  build:
+    runs-on: macos-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Print Xcode version
+        run: xcodebuild -version
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20.x
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Generate iOS project (Prebuild)
+        run: npx expo prebuild -p ios --clean
+
+      - name: Patch Podfile and reinstall pods
+        run: |
+          cd ios
+          # Suppress all warnings in third-party pods (fixes Xcode 16.4 nullability errors)
+          sed -i '' '1s/^/inhibit_all_warnings!\
+          /' Podfile
+          echo "--- Podfile head ---"
+          head -5 Podfile
+          pod install --repo-update
+
+      - name: Suppress nullability warnings in pod xcconfigs
+        run: |
+          cd ios
+          # Patch all pod xcconfig files to add -Wno-nullability-completeness
+          find Pods/Target\ Support\ Files -name "*.xcconfig" | while read f; do
+            if grep -q "OTHER_CFLAGS" "$f"; then
+              sed -i '' 's/OTHER_CFLAGS = /OTHER_CFLAGS = -Wno-nullability-completeness /g' "$f"
+            fi
+          done
+          echo "Patched xcconfig files"
+
+      - name: Build unsigned archive
+        run: |
+          cd ios
+          # Auto-detect Workspace and Scheme
+          WORKSPACE=$(ls -d *.xcworkspace | head -n 1)
+          SCHEME=$(basename "$WORKSPACE" .xcworkspace)
+
+          echo "Building Workspace: $WORKSPACE, Scheme: $SCHEME"
+
+          xcodebuild archive \
+            -workspace "$WORKSPACE" \
+            -scheme "$SCHEME" \
+            -configuration Debug \
+            -sdk iphoneos \
+            -archivePath unsigned.xcarchive \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            COMPILER_INDEX_STORE_ENABLE=NO \
+            SKIP_INSTALL=NO \
+            GCC_TREAT_WARNINGS_AS_ERRORS=NO
+
+      - name: Package into IPA
+        run: |
+          cd ios
+          echo "Archive contents:"
+          find unsigned.xcarchive -name "*.app" -type d
+
+          mkdir -p Payload
+          APP_PATH=$(find unsigned.xcarchive -name "*.app" -type d | head -n 1)
+          if [ -z "$APP_PATH" ]; then
+            echo "Error: .app file not found inside the archive!"
+            echo "Full archive structure:"
+            find unsigned.xcarchive -type d
+            exit 1
+          fi
+          echo "Found app at: $APP_PATH"
+          cp -r "$APP_PATH" Payload/
+          zip -r ../GoCommutePH-DevClient.ipa Payload
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: GoCommutePH-DevClient-ipa
+          path: GoCommutePH-DevClient.ipa
