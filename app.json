@@ -2,6 +2,7 @@
   "expo": {
     "name": "Go commute PH",
     "slug": "go-commute-ph",
+    "scheme": "gocommuteph",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
@@ -21,7 +22,14 @@
         {
           "locationAlwaysAndWhenInUsePermission": "Allow Go commute PH to use your location."
         }
-      ]
+      ],
+      [
+        "@react-native-google-signin/google-signin",
+        {
+          "iosUrlScheme": "com.googleusercontent.apps.397434180936-mcsbsmcni4l3lekjti8rk5a2us881ase"
+        }
+      ],
+      "expo-web-browser"
     ],
     "android": {
       "package": "com.neonfelixe.gocommuteph",
