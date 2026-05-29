@@ -1,18 +1,30 @@
+// Pseudo-random generator based on a seed
+const seededRandom = (seed) => {
+  const x = Math.sin(seed++) * 10000;
+  return x - Math.floor(x);
+};
+
 // Simulates real-world traffic probability, commuter wait times, and rush hour factors
+// Uses a 15-minute time bucket to keep ETAs stable within a short session
 const calculateTrafficMultiplier = () => {
-  const currentHour = new Date().getHours();
+  const now = new Date();
+  const currentHour = now.getHours();
+  // 15-minute bucket seed
+  const timeSeed = Math.floor(now.getTime() / (1000 * 60 * 15));
+  const rand = seededRandom(timeSeed);
+
   // Rush hours: 7-9 AM, 5-8 PM
   const isMorningRush = currentHour >= 7 && currentHour <= 9;
   const isEveningRush = currentHour >= 17 && currentHour <= 20;
   
-  if (isMorningRush) return 1.6 + (Math.random() * 0.4); // 1.6x to 2.0x delay
-  if (isEveningRush) return 1.8 + (Math.random() * 0.5); // 1.8x to 2.3x delay
+  if (isMorningRush) return 1.6 + (rand * 0.4); // 1.6x to 2.0x delay
+  if (isEveningRush) return 1.8 + (rand * 0.5); // 1.8x to 2.3x delay
   
   // Midday traffic
-  if (currentHour >= 10 && currentHour <= 16) return 1.2 + (Math.random() * 0.3);
+  if (currentHour >= 10 && currentHour <= 16) return 1.2 + (rand * 0.3);
   
   // Late night / Early morning
-  return 0.9 + (Math.random() * 0.2); // Smooth sailing but potential slight variance
+  return 0.9 + (rand * 0.2); // Smooth sailing but potential slight variance
 };
 
 // Generates probabilistic wait times for transit vehicles
@@ -25,11 +37,14 @@ const getWaitTime = (vehicleType) => {
   };
   
   const base = baseWait[vehicleType] || 5;
-  const variance = Math.floor(Math.random() * base); 
+  // Use time bucket for stable wait times
+  const timeSeed = Math.floor(new Date().getTime() / (1000 * 60 * 15));
+  const rand = seededRandom(timeSeed + base);
+  const variance = Math.floor(rand * base); 
   return base - (base / 2) + variance; 
 };
 
-export const generateMultiModalRouteOptions = (distanceKm, durationMins, destinationName = '') => {
+export const generateMultiModalRouteOptions = (distanceKm, durationMins, destinationName = '', hasDiscount = false) => {
   const options = [];
   const trafficMlt = calculateTrafficMultiplier();
   
@@ -45,11 +60,16 @@ export const generateMultiModalRouteOptions = (distanceKm, durationMins, destina
   
   const totalTrainTime = trainSteps.reduce((acc, step) => acc + step.duration, 0);
 
+  let trainFare = 20 + Math.floor(distanceKm * 1.5);
+  if (hasDiscount) trainFare = Math.floor(trainFare * 0.8);
+
   options.push({
     id: 'opt_train',
     title: 'Train Combo',
     badge: 'Fastest',
     durationMins: totalTrainTime,
+    duration: totalTrainTime,
+    suggestedFare: trainFare,
     steps: trainSteps
   });
 
@@ -65,11 +85,16 @@ export const generateMultiModalRouteOptions = (distanceKm, durationMins, destina
 
   const totalRoadTime = roadSteps.reduce((acc, step) => acc + step.duration, 0);
 
+  let roadFare = isBus ? 15 + Math.floor(distanceKm * 2) : 13 + Math.floor(Math.max(0, distanceKm - 4) * 1.5);
+  if (hasDiscount) roadFare = Math.floor(roadFare * 0.8);
+
   options.push({
     id: 'opt_road',
     title: isBus ? 'Bus Route' : 'Direct Jeepney',
     badge: 'Budget',
     durationMins: totalRoadTime,
+    duration: totalRoadTime,
+    suggestedFare: roadFare,
     steps: roadSteps
   });
 
@@ -85,11 +110,16 @@ export const generateMultiModalRouteOptions = (distanceKm, durationMins, destina
     
     const totalUvTime = uvSteps.reduce((acc, step) => acc + step.duration, 0);
 
+    let uvFare = 30 + Math.floor(distanceKm * 2.5);
+    if (hasDiscount) uvFare = Math.floor(uvFare * 0.8);
+
     options.push({
       id: 'opt_uv',
       title: 'UV Express',
       badge: 'Comfort',
       durationMins: totalUvTime,
+      duration: totalUvTime,
+      suggestedFare: uvFare,
       steps: uvSteps
     });
   }

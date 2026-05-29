@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import * as Location from 'expo-location';
 
-export const useLocationTracking = () => {
+export const useLocationTracking = (isCommuting = false) => {
   const [location, setLocation] = useState(null);
   const [errorMsg, setErrorMsg] = useState(null);
   const locationSubscription = useRef(null);
@@ -32,8 +32,8 @@ export const useLocationTracking = () => {
       locationSubscription.current = await Location.watchPositionAsync(
         {
           accuracy: Location.Accuracy.High,
-          timeInterval: 2000,
-          distanceInterval: 5,
+          timeInterval: isCommuting ? 2000 : 10000,
+          distanceInterval: isCommuting ? 5 : 15,
         },
         (newLocation) => {
           if (isMounted) setLocation(newLocation);
@@ -49,7 +49,7 @@ export const useLocationTracking = () => {
         locationSubscription.current = null;
       }
     };
-  }, []); // Run only once on mount
+  }, [isCommuting]); // Re-run when commuting mode changes
 
   return { location, errorMsg };
 };
